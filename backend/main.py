@@ -26,7 +26,7 @@ from PIL import Image
 # ---------------------------------------------------------
 from database import (
     save_scan,
-    get_scans,
+    get_all_scans,
     delete_all_scans,
     delete_scan,
     save_feedback,
@@ -620,7 +620,7 @@ async def predict_batch(
 def scans():
 
     try:
-        return get_scans()
+        return get_all_scans()
 
     except Exception as e:
 
