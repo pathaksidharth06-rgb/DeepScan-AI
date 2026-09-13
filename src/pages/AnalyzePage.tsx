@@ -6,7 +6,7 @@ import type { SonarScan } from '../types/sonar';
 import { storageService } from '../services/storageService';
 import { generateSurveyPdfReport } from '../services/pdfReportGenerator';
 
-const BACKEND_URL = 'http://localhost:8000';
+const BACKEND_URL = 'https://deepscan-ai-tyvx.onrender.com';
 
 export const AnalyzePage: React.FC = () => {
   // 100% Clean initial state: NO fake shipwreck and NO pre-selected photo!
@@ -43,12 +43,15 @@ export const AnalyzePage: React.FC = () => {
     if (files.length === 1) {
       const file = files[0];
       const reader = new FileReader();
+
       reader.onload = (e) => {
         const previewUrl = e.target?.result as string;
+
         setSelectedScan({
           id: `preview-${Date.now()}`,
           filename: file.name,
-          fileSizeMB: Math.round((file.size / (1024 * 1024)) * 100) / 100 || 0.01,
+          fileSizeMB:
+            Math.round((file.size / (1024 * 1024)) * 100) / 100 || 0.01,
           resolution: { width: 1024, height: 800 },
           imageUrl: previewUrl,
           detections: [],
@@ -57,6 +60,7 @@ export const AnalyzePage: React.FC = () => {
           modelVersion: 'YOLO11n (best.pt)',
         });
       };
+
       reader.readAsDataURL(file);
     } else {
       setSelectedScan(null);
@@ -65,7 +69,9 @@ export const AnalyzePage: React.FC = () => {
 
   const handleRemoveFile = (index: number) => {
     const updated = uploadedFiles.filter((_, i) => i !== index);
+
     setUploadedFiles(updated);
+
     if (updated.length === 0) {
       setSelectedScan(null);
       setActiveResultsScan(null);
@@ -101,11 +107,14 @@ export const AnalyzePage: React.FC = () => {
 
         if (response.ok) {
           const liveData: SonarScan = await response.json();
+
           setIsScanning(false);
           setActiveResultsScan(liveData);
           setBatchScans([liveData]);
           setCurrentBatchIndex(0);
+
           storageService.saveScan(liveData);
+
           return;
         }
       } catch (err) {
@@ -117,6 +126,7 @@ export const AnalyzePage: React.FC = () => {
     if (uploadedFiles.length > 1 && backendOnline) {
       try {
         const formData = new FormData();
+
         uploadedFiles.forEach((file) => {
           formData.append('files', file);
         });
@@ -128,11 +138,14 @@ export const AnalyzePage: React.FC = () => {
 
         if (response.ok) {
           const liveBatch: SonarScan[] = await response.json();
+
           setIsScanning(false);
           setBatchScans(liveBatch);
           setCurrentBatchIndex(0);
           setActiveResultsScan(liveBatch[0]);
+
           liveBatch.forEach((scan) => storageService.saveScan(scan));
+
           return;
         }
       } catch (err) {
@@ -142,13 +155,17 @@ export const AnalyzePage: React.FC = () => {
 
     // 3. Clean completion if backend was unavailable
     setIsScanning(false);
+
     if (!backendOnline) {
-      alert("DeepScan AI Backend is offline or unreachable on http://localhost:8000. Please start the backend to run live inference.");
+      alert(
+        'DeepScan AI Backend is offline or unreachable. Please try again in a few seconds.'
+      );
     }
   };
 
   const handleSelectBatchIndex = (idx: number) => {
     setCurrentBatchIndex(idx);
+
     if (batchScans[idx]) {
       setActiveResultsScan(batchScans[idx]);
     }
@@ -156,19 +173,41 @@ export const AnalyzePage: React.FC = () => {
 
   const handleVerify = (detectionId: string) => {
     if (!activeResultsScan) return;
-    storageService.updateDetectionReview(activeResultsScan.id, detectionId, 'verified');
+
+    storageService.updateDetectionReview(
+      activeResultsScan.id,
+      detectionId,
+      'verified'
+    );
+
     const updated = { ...activeResultsScan };
+
     const det = updated.detections.find((d) => d.id === detectionId);
-    if (det) det.verificationStatus = 'verified';
+
+    if (det) {
+      det.verificationStatus = 'verified';
+    }
+
     setActiveResultsScan(updated);
   };
 
   const handleReject = (detectionId: string) => {
     if (!activeResultsScan) return;
-    storageService.updateDetectionReview(activeResultsScan.id, detectionId, 'rejected');
+
+    storageService.updateDetectionReview(
+      activeResultsScan.id,
+      detectionId,
+      'rejected'
+    );
+
     const updated = { ...activeResultsScan };
+
     const det = updated.detections.find((d) => d.id === detectionId);
-    if (det) det.verificationStatus = 'rejected';
+
+    if (det) {
+      det.verificationStatus = 'rejected';
+    }
+
     setActiveResultsScan(updated);
   };
 
