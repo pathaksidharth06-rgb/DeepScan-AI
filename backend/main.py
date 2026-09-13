@@ -1,18 +1,11 @@
 """
-DeepScan AI - FastAPI Inference & Decision Support Server
-ONNX Runtime version for low-memory deployment.
+DeepScan AI - FastAPI Backend
+ONNX Runtime version
 
 Uses:
     backend/best.onnx
 
-Keeps the existing frontend-compatible API:
-    GET  /health
-    POST /predict
-    POST /predict-batch
-    GET  /scans
-    DELETE /scans
-    DELETE /scans/{scan_id}
-    POST /feedback
+The API remains compatible with the existing frontend.
 """
 
 import os
@@ -20,6 +13,7 @@ import uuid
 import base64
 import io
 import time
+import gc
 from datetime import datetime
 
 import numpy as np
@@ -38,14 +32,22 @@ import database
 
 
 # ============================================================
-# APP
+# FASTAPI APP
 # ============================================================
 
 app = FastAPI(
     title="DeepScan AI - Underwater Sonar Intelligence API",
     version="2.1.0",
-    description="ONNX Runtime YOLO11n inference and decision-support API for Side-Scan Sonar imagery",
+    description=(
+        "AI-powered Side-Scan Sonar Intelligence "
+        "and Mission Analysis API using ONNX Runtime."
+    )
 )
+
+
+# ============================================================
+# CORS
+# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,12 +62,19 @@ app.add_middleware(
 # PATHS
 # ============================================================
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
 
-MODEL_PATH = os.path.join(BASE_DIR, "best.onnx")
+OUTPUTS_DIR = os.path.join(
+    BASE_DIR,
+    "outputs"
+)
 
-OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
-os.makedirs(OUTPUTS_DIR, exist_ok=True)
+os.makedirs(
+    OUTPUTS_DIR,
+    exist_ok=True
+)
 
 app.mount(
     "/outputs",
@@ -75,7 +84,7 @@ app.mount(
 
 
 # ============================================================
-# CONFIGURATION
+# BACKEND PUBLIC URL
 # ============================================================
 
 BACKEND_PUBLIC_URL = os.getenv(
@@ -83,13 +92,19 @@ BACKEND_PUBLIC_URL = os.getenv(
     "https://deepscan-ai-tyvx.onrender.com"
 ).rstrip("/")
 
-CONFIDENCE_THRESHOLD = 0.20
-NMS_IOU_THRESHOLD = 0.45
-MAX_DETECTIONS = 10
+
+# ============================================================
+# MODEL
+# ============================================================
+
+MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "best.onnx"
+)
 
 
 # ============================================================
-# CLASS NAMES
+# MODEL CLASSES
 # ============================================================
 
 CLASS_NAMES = {
@@ -108,41 +123,75 @@ CLASS_NAMES = {
 
 
 # ============================================================
+# INFERENCE SETTINGS
+# ============================================================
+
+CONFIDENCE_THRESHOLD = 0.20
+IOU_THRESHOLD = 0.45
+MAX_DETECTIONS = 10
+
+
+# ============================================================
 # LOAD ONNX MODEL
 # ============================================================
 
+print("==============================================")
+print("          DEEPSCAN AI BACKEND")
+print("==============================================")
+
+print("Loading ONNX model...")
+print("Model path:")
+print(MODEL_PATH)
+
+
 if not os.path.exists(MODEL_PATH):
+
     raise FileNotFoundError(
-        f"ONNX model not found: {MODEL_PATH}. "
-        "Make sure backend/best.onnx exists."
+        f"ONNX model not found: {MODEL_PATH}"
     )
 
 
-print("Loading ONNX model from best.onnx...")
-
 session = ort.InferenceSession(
     MODEL_PATH,
-    providers=["CPUExecutionProvider"],
+    providers=["CPUExecutionProvider"]
 )
 
-input_meta = session.get_inputs()[0]
-INPUT_NAME = input_meta.name
-INPUT_SHAPE = input_meta.shape
 
-# Usually YOLO ONNX is [1, 3, 256, 256] or [1, 3, 640, 640]
+INPUT_NAME = session.get_inputs()[0].name
+
+INPUT_SHAPE = session.get_inputs()[0].shape
+
+
 try:
-    INPUT_HEIGHT = int(INPUT_SHAPE[2])
-    INPUT_WIDTH = int(INPUT_SHAPE[3])
+
+    INPUT_HEIGHT = int(
+        INPUT_SHAPE[2]
+    )
+
+    INPUT_WIDTH = int(
+        INPUT_SHAPE[3]
+    )
+
 except Exception:
+
     INPUT_HEIGHT = 256
     INPUT_WIDTH = 256
 
+
 print(
-    f"ONNX model loaded successfully. "
-    f"Input: {INPUT_WIDTH}x{INPUT_HEIGHT}"
+    "ONNX model loaded successfully!"
 )
 
-print(f"Classes: {CLASS_NAMES}")
+print(
+    f"Input size: "
+    f"{INPUT_WIDTH}x{INPUT_HEIGHT}"
+)
+
+print(
+    f"Classes: {CLASS_NAMES}"
+)
+
+print("==============================================")
 
 
 # ============================================================
@@ -151,103 +200,242 @@ print(f"Classes: {CLASS_NAMES}")
 
 @app.on_event("startup")
 def startup():
+
     database.init_db()
+
+
+# ============================================================
+# ROOT
+# ============================================================
+
+@app.get("/")
+def home():
+
+    return {
+        "message":
+            "DeepScan AI Backend is running",
+
+        "status":
+            "online",
+
+        "model":
+            "best.onnx",
+
+        "runtime":
+            "ONNX Runtime",
+
+        "classes":
+            CLASS_NAMES,
+
+        "number_of_classes":
+            len(CLASS_NAMES),
+
+        "natural_view":
+            False,
+
+        "intelligence_engine":
+            True,
+
+        "human_in_the_loop":
+            True,
+
+        "database":
+            "SQLite",
+
+        "batch_mission":
+            True
+    }
 
 
 # ============================================================
 # HEALTH
 # ============================================================
 
-@app.get("/")
-def root():
-    return {
-        "status": "ONLINE",
-        "service": "DeepScan AI",
-        "model": "YOLO11n ONNX (best.onnx)",
-        "runtime": "ONNX Runtime",
-    }
-
-
 @app.get("/health")
 def health_check():
+
     return {
-        "status": "ONLINE",
-        "model": "YOLO11n ONNX (best.onnx)",
-        "runtime": "ONNX Runtime CPU",
-        "classes": CLASS_NAMES,
-        "taxonomy_classes": len(CLASS_NAMES),
-        "input_size": {
-            "width": INPUT_WIDTH,
-            "height": INPUT_HEIGHT,
-        },
-        "sonar_quality_analyzer": "ACTIVE",
+
+        "status":
+            "ONLINE",
+
+        "model":
+            "YOLO11n (best.onnx)",
+
+        "runtime":
+            "ONNX Runtime CPU",
+
+        "classes":
+            CLASS_NAMES,
+
+        "taxonomy_classes":
+            len(CLASS_NAMES),
+
+        "model_file_present":
+            os.path.exists(MODEL_PATH),
+
+        "sonar_quality_analyzer":
+            "ACTIVE",
+
         "quality_modules": [
+
             "speckle_noise",
+
             "resolution_quality",
+
             "acoustic_shadow",
+
             "motion_dropout",
-            "evidence_score",
+
+            "evidence_score"
         ],
+
+        "input_size": {
+
+            "width":
+                INPUT_WIDTH,
+
+            "height":
+                INPUT_HEIGHT
+        }
     }
 
 
 # ============================================================
-# IMAGE PREPROCESSING
+# MODEL INFO
 # ============================================================
 
-def letterbox_image(image: Image.Image):
-    """
-    Resize image while preserving aspect ratio.
-    Pads the image to the ONNX model input size.
-    """
+@app.get("/model-info")
+def model_info():
 
-    original_width, original_height = image.size
+    return {
 
-    scale = min(
-        INPUT_WIDTH / original_width,
-        INPUT_HEIGHT / original_height
+        "model":
+            "best.onnx",
+
+        "runtime":
+            "ONNX Runtime",
+
+        "classes":
+            CLASS_NAMES,
+
+        "number_of_classes":
+            len(CLASS_NAMES),
+
+        "natural_view":
+            False,
+
+        "intelligence_engine":
+            True,
+
+        "human_in_the_loop":
+            True,
+
+        "database":
+            "SQLite",
+
+        "batch_mission":
+            True
+    }
+
+
+# ============================================================
+# LETTERBOX
+# ============================================================
+
+def preprocess_image(image):
+
+    original_width, original_height = (
+        image.size
     )
 
-    new_width = max(1, int(round(original_width * scale)))
-    new_height = max(1, int(round(original_height * scale)))
+    scale = min(
+
+        INPUT_WIDTH /
+        original_width,
+
+        INPUT_HEIGHT /
+        original_height
+    )
+
+    new_width = max(
+        1,
+        int(
+            round(
+                original_width * scale
+            )
+        )
+    )
+
+    new_height = max(
+        1,
+        int(
+            round(
+                original_height * scale
+            )
+        )
+    )
 
     resized = image.resize(
-        (new_width, new_height),
+        (
+            new_width,
+            new_height
+        ),
         Image.Resampling.BILINEAR
     )
 
     canvas = Image.new(
         "RGB",
-        (INPUT_WIDTH, INPUT_HEIGHT),
+        (
+            INPUT_WIDTH,
+            INPUT_HEIGHT
+        ),
         (114, 114, 114)
     )
 
-    pad_x = (INPUT_WIDTH - new_width) // 2
-    pad_y = (INPUT_HEIGHT - new_height) // 2
+    pad_x = (
+        INPUT_WIDTH -
+        new_width
+    ) // 2
+
+    pad_y = (
+        INPUT_HEIGHT -
+        new_height
+    ) // 2
 
     canvas.paste(
         resized,
-        (pad_x, pad_y)
+        (
+            pad_x,
+            pad_y
+        )
     )
 
-    image_array = np.asarray(canvas).astype(np.float32)
+    array = np.asarray(
+        canvas,
+        dtype=np.float32
+    )
 
-    # HWC -> CHW
-    image_array = image_array.transpose(2, 0, 1)
+    array = array.transpose(
+        2,
+        0,
+        1
+    )
 
-    # 0-255 -> 0-1
-    image_array /= 255.0
+    array /= 255.0
 
-    # Add batch dimension
-    image_array = np.expand_dims(image_array, axis=0)
+    array = np.expand_dims(
+        array,
+        axis=0
+    )
 
     return (
-        image_array,
+        array,
         scale,
         pad_x,
         pad_y,
         original_width,
-        original_height,
+        original_height
     )
 
 
@@ -255,33 +443,84 @@ def letterbox_image(image: Image.Image):
 # IOU
 # ============================================================
 
-def calculate_iou(box_a, box_b):
-    """
-    Calculate Intersection over Union.
-    """
+def calculate_iou(
+    box1,
+    box2
+):
 
-    ax1, ay1, ax2, ay2 = box_a
-    bx1, by1, bx2, by2 = box_b
+    x1 = max(
+        box1[0],
+        box2[0]
+    )
 
-    inter_x1 = max(ax1, bx1)
-    inter_y1 = max(ay1, by1)
-    inter_x2 = min(ax2, bx2)
-    inter_y2 = min(ay2, by2)
+    y1 = max(
+        box1[1],
+        box2[1]
+    )
 
-    inter_width = max(0.0, inter_x2 - inter_x1)
-    inter_height = max(0.0, inter_y2 - inter_y1)
+    x2 = min(
+        box1[2],
+        box2[2]
+    )
 
-    intersection = inter_width * inter_height
+    y2 = min(
+        box1[3],
+        box2[3]
+    )
 
-    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
-    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    intersection_width = max(
+        0.0,
+        x2 - x1
+    )
 
-    union = area_a + area_b - intersection
+    intersection_height = max(
+        0.0,
+        y2 - y1
+    )
+
+    intersection = (
+        intersection_width *
+        intersection_height
+    )
+
+    area1 = (
+        max(
+            0.0,
+            box1[2] - box1[0]
+        )
+        *
+        max(
+            0.0,
+            box1[3] - box1[1]
+        )
+    )
+
+    area2 = (
+        max(
+            0.0,
+            box2[2] - box2[0]
+        )
+        *
+        max(
+            0.0,
+            box2[3] - box2[1]
+        )
+    )
+
+    union = (
+        area1 +
+        area2 -
+        intersection
+    )
 
     if union <= 0:
+
         return 0.0
 
-    return intersection / union
+    return (
+        intersection /
+        union
+    )
 
 
 # ============================================================
@@ -291,88 +530,103 @@ def calculate_iou(box_a, box_b):
 def non_max_suppression(
     boxes,
     scores,
-    class_ids,
-    iou_threshold=0.45,
-    max_detections=10,
+    class_ids
 ):
-    """
-    Class-aware Non-Maximum Suppression.
-    """
 
     if len(boxes) == 0:
+
         return []
 
-    boxes = np.asarray(boxes, dtype=np.float32)
-    scores = np.asarray(scores, dtype=np.float32)
-    class_ids = np.asarray(class_ids, dtype=np.int32)
+
+    boxes = np.asarray(
+        boxes,
+        dtype=np.float32
+    )
+
+    scores = np.asarray(
+        scores,
+        dtype=np.float32
+    )
+
+    class_ids = np.asarray(
+        class_ids,
+        dtype=np.int32
+    )
 
     keep = []
 
-    # Process each class separately
-    unique_classes = np.unique(class_ids)
 
-    for class_id in unique_classes:
+    for class_id in np.unique(
+        class_ids
+    ):
 
-        indices = np.where(class_ids == class_id)[0]
+        indices = np.where(
+            class_ids ==
+            class_id
+        )[0]
 
-        # Highest confidence first
         indices = indices[
-            np.argsort(scores[indices])[::-1]
+            np.argsort(
+                scores[indices]
+            )[::-1]
         ]
+
 
         while len(indices) > 0:
 
             current = indices[0]
 
-            keep.append(int(current))
+            keep.append(
+                int(current)
+            )
 
-            if len(keep) >= max_detections:
+            if len(keep) >= MAX_DETECTIONS:
+
                 break
+
 
             remaining = []
 
-            for idx in indices[1:]:
+            for index in indices[1:]:
 
                 iou = calculate_iou(
                     boxes[current],
-                    boxes[idx]
+                    boxes[index]
                 )
 
-                if iou < iou_threshold:
-                    remaining.append(idx)
+                if iou < IOU_THRESHOLD:
+
+                    remaining.append(
+                        index
+                    )
 
             indices = np.asarray(
                 remaining,
                 dtype=np.int32
             )
 
-        if len(keep) >= max_detections:
+
+        if len(keep) >= MAX_DETECTIONS:
+
             break
 
-    # Sort final detections by confidence
-    keep = sorted(
-        keep,
-        key=lambda i: float(scores[i]),
+
+    keep.sort(
+        key=lambda x:
+            float(scores[x]),
         reverse=True
     )
 
-    return keep[:max_detections]
+    return keep[
+        :MAX_DETECTIONS
+    ]
 
 
 # ============================================================
 # ONNX INFERENCE
 # ============================================================
 
-def run_onnx_inference(image: Image.Image):
-    """
-    Run YOLO ONNX inference.
-
-    Expected YOLO export output:
-        [1, 4 + number_of_classes, number_of_predictions]
-
-    For 11 classes:
-        [1, 15, N]
-    """
+def run_inference(image):
 
     (
         input_tensor,
@@ -380,98 +634,200 @@ def run_onnx_inference(image: Image.Image):
         pad_x,
         pad_y,
         original_width,
-        original_height,
-    ) = letterbox_image(image)
+        original_height
+    ) = preprocess_image(
+        image
+    )
 
-    start = time.perf_counter()
+
+    start_time = time.perf_counter()
+
 
     outputs = session.run(
         None,
         {
-            INPUT_NAME: input_tensor
+            INPUT_NAME:
+                input_tensor
         }
     )
 
-    inference_time_ms = int(
-        (time.perf_counter() - start) * 1000
+
+    processing_time_ms = int(
+
+        (
+            time.perf_counter()
+            -
+            start_time
+        )
+        *
+        1000
     )
 
+
     if not outputs:
-        return [], inference_time_ms
 
-    output = outputs[0]
-
-    output = np.asarray(output)
-
-    # Remove batch dimension
-    if output.ndim == 3:
-        output = output[0]
-
-    # YOLO commonly returns [channels, predictions]
-    # Convert to [predictions, channels]
-    if output.shape[0] < output.shape[1]:
-        output = output.transpose(1, 0)
-
-    number_of_channels = output.shape[1]
-
-    expected_channels = 4 + len(CLASS_NAMES)
-
-    if number_of_channels < expected_channels:
-        raise RuntimeError(
-            f"Unexpected ONNX output shape: {output.shape}. "
-            f"Expected at least {expected_channels} channels."
+        return (
+            [],
+            processing_time_ms
         )
 
-    # First four values are xywh
-    boxes_xywh = output[:, :4]
 
-    # Remaining values are class confidence scores
-    class_scores = output[:, 4:4 + len(CLASS_NAMES)]
+    output = np.asarray(
+        outputs[0]
+    )
+
+
+    if output.ndim == 3:
+
+        output = output[0]
+
+
+    # YOLO ONNX normally returns:
+    # [1, 4 + classes, predictions]
+    #
+    # Convert to:
+    # [predictions, 4 + classes]
+
+    if output.shape[0] < output.shape[1]:
+
+        output = output.transpose(
+            1,
+            0
+        )
+
+
+    expected_channels = (
+        4 +
+        len(CLASS_NAMES)
+    )
+
+
+    if output.shape[1] < expected_channels:
+
+        raise RuntimeError(
+            "Unexpected ONNX output shape: "
+            f"{output.shape}"
+        )
+
+
+    boxes_xywh = output[
+        :,
+        :4
+    ]
+
+
+    class_scores = output[
+        :,
+        4:
+        4 + len(CLASS_NAMES)
+    ]
+
 
     class_ids = np.argmax(
         class_scores,
         axis=1
     )
 
+
     confidences = np.max(
         class_scores,
         axis=1
     )
 
-    # Confidence filter
-    mask = confidences >= CONFIDENCE_THRESHOLD
 
-    boxes_xywh = boxes_xywh[mask]
-    confidences = confidences[mask]
-    class_ids = class_ids[mask]
-
-    if len(boxes_xywh) == 0:
-        return [], inference_time_ms
-
-    # Convert xywh -> xyxy
-    cx = boxes_xywh[:, 0]
-    cy = boxes_xywh[:, 1]
-    width = boxes_xywh[:, 2]
-    height = boxes_xywh[:, 3]
-
-    x1 = cx - width / 2
-    y1 = cy - height / 2
-    x2 = cx + width / 2
-    y2 = cy + height / 2
-
-    boxes = np.column_stack(
-        [x1, y1, x2, y2]
+    mask = (
+        confidences >=
+        CONFIDENCE_THRESHOLD
     )
 
-    # Remove letterbox padding
+
+    boxes_xywh = boxes_xywh[
+        mask
+    ]
+
+    confidences = confidences[
+        mask
+    ]
+
+    class_ids = class_ids[
+        mask
+    ]
+
+
+    if len(boxes_xywh) == 0:
+
+        return (
+            [],
+            processing_time_ms
+        )
+
+
+    # --------------------------------------------------------
+    # XYWH -> XYXY
+    # --------------------------------------------------------
+
+    cx = boxes_xywh[:, 0]
+
+    cy = boxes_xywh[:, 1]
+
+    width = boxes_xywh[:, 2]
+
+    height = boxes_xywh[:, 3]
+
+
+    x1 = (
+        cx -
+        width / 2
+    )
+
+    y1 = (
+        cy -
+        height / 2
+    )
+
+    x2 = (
+        cx +
+        width / 2
+    )
+
+    y2 = (
+        cy +
+        height / 2
+    )
+
+
+    boxes = np.column_stack(
+        [
+            x1,
+            y1,
+            x2,
+            y2
+        ]
+    )
+
+
+    # --------------------------------------------------------
+    # Remove padding
+    # --------------------------------------------------------
+
     boxes[:, [0, 2]] -= pad_x
+
     boxes[:, [1, 3]] -= pad_y
 
-    # Convert back to original image coordinates
+
+    # --------------------------------------------------------
+    # Scale to original image
+    # --------------------------------------------------------
+
     boxes[:, [0, 2]] /= scale
+
     boxes[:, [1, 3]] /= scale
 
-    # Clip to original image
+
+    # --------------------------------------------------------
+    # Clip boxes
+    # --------------------------------------------------------
+
     boxes[:, [0, 2]] = np.clip(
         boxes[:, [0, 2]],
         0,
@@ -484,41 +840,64 @@ def run_onnx_inference(image: Image.Image):
         original_height
     )
 
+
+    # --------------------------------------------------------
     # NMS
-    keep_indices = non_max_suppression(
+    # --------------------------------------------------------
+
+    keep = non_max_suppression(
         boxes,
         confidences,
-        class_ids,
-        iou_threshold=NMS_IOU_THRESHOLD,
-        max_detections=MAX_DETECTIONS,
+        class_ids
     )
+
 
     detections = []
 
-    for index in keep_indices:
 
-        x1, y1, x2, y2 = boxes[index]
+    for index in keep:
 
-        confidence = float(
-            confidences[index]
-        )
-
-        class_id = int(
-            class_ids[index]
+        x1, y1, x2, y2 = (
+            boxes[index]
         )
 
         detections.append({
+
+            "class_id":
+                int(
+                    class_ids[index]
+                ),
+
+            "confidence":
+                float(
+                    confidences[index]
+                ),
+
             "bbox": [
+
                 float(x1),
+
                 float(y1),
+
                 float(x2),
-                float(y2),
-            ],
-            "confidence": confidence,
-            "class_id": class_id,
+
+                float(y2)
+            ]
         })
 
-    return detections, inference_time_ms
+
+    # Free temporary arrays
+    del output
+    del outputs
+    del input_tensor
+
+    gc.collect()
+
+
+    return (
+        detections,
+        processing_time_ms
+    )
 
 
 # ============================================================
@@ -526,90 +905,131 @@ def run_onnx_inference(image: Image.Image):
 # ============================================================
 
 def create_annotated_image(
-    image: Image.Image,
-    detections: list,
+    image,
+    detections
 ):
-    """
-    Draw bounding boxes without OpenCV.
-    """
 
-    annotated = image.copy().convert("RGB")
+    annotated = image.copy().convert(
+        "RGB"
+    )
 
-    draw = ImageDraw.Draw(annotated)
+    draw = ImageDraw.Draw(
+        annotated
+    )
 
     try:
+
         font = ImageFont.load_default()
+
     except Exception:
+
         font = None
+
 
     for detection in detections:
 
-        x1, y1, x2, y2 = detection["bbox"]
+        x1, y1, x2, y2 = (
+            detection["bbox"]
+        )
 
-        confidence = detection["confidence"]
-        class_id = detection["class_id"]
+        class_id = (
+            detection["class_id"]
+        )
+
+        confidence = (
+            detection["confidence"]
+        )
 
         class_name = CLASS_NAMES.get(
             class_id,
             "Unknown Anomaly"
         )
 
+
         label = (
             f"{class_name} "
             f"{confidence * 100:.1f}%"
         )
 
-        # Bounding box
+
         draw.rectangle(
             [
                 x1,
                 y1,
                 x2,
-                y2,
+                y2
             ],
             outline=(255, 0, 0),
-            width=3,
+            width=3
         )
 
-        # Label background
+
         try:
-            bbox = draw.textbbox(
-                (x1, y1),
+
+            text_box = draw.textbbox(
+                (
+                    x1,
+                    y1
+                ),
                 label,
                 font=font
             )
 
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
+            text_width = (
+                text_box[2]
+                -
+                text_box[0]
+            )
+
+            text_height = (
+                text_box[3]
+                -
+                text_box[1]
+            )
 
         except Exception:
-            text_width = len(label) * 7
+
+            text_width = (
+                len(label) *
+                7
+            )
+
             text_height = 12
+
 
         label_y = max(
             0,
-            y1 - text_height - 4
+            y1 -
+            text_height -
+            4
         )
+
 
         draw.rectangle(
             [
                 x1,
                 label_y,
-                x1 + text_width + 6,
-                label_y + text_height + 4,
+                x1 +
+                text_width +
+                6,
+                label_y +
+                text_height +
+                4
             ],
-            fill=(255, 0, 0),
+            fill=(255, 0, 0)
         )
+
 
         draw.text(
             (
                 x1 + 3,
-                label_y + 2,
+                label_y + 2
             ),
             label,
             fill=(255, 255, 255),
-            font=font,
+            font=font
         )
+
 
     return annotated
 
@@ -621,49 +1041,77 @@ def create_annotated_image(
 def process_image(
     image_bytes: bytes,
     filename: str
-) -> dict:
+):
 
     scan_id = (
         f"scan-{uuid.uuid4().hex[:8]}"
     )
 
+
+    # --------------------------------------------------------
+    # Open image
+    # --------------------------------------------------------
+
     image = Image.open(
-        io.BytesIO(image_bytes)
+        io.BytesIO(
+            image_bytes
+        )
     ).convert("RGB")
 
-    width, height = image.size
+
+    width, height = (
+        image.size
+    )
+
 
     file_size_mb = round(
-        len(image_bytes) / (1024 * 1024),
+        len(image_bytes)
+        /
+        (
+            1024 * 1024
+        ),
         2
     )
 
+
     # --------------------------------------------------------
-    # ONNX INFERENCE
+    # ONNX DETECTION
     # --------------------------------------------------------
 
     raw_detections, processing_time_ms = (
-        run_onnx_inference(image)
+        run_inference(
+            image
+        )
     )
 
+
     # --------------------------------------------------------
-    # INTELLIGENCE ENGINE
+    # INTELLIGENCE
     # --------------------------------------------------------
 
     detections = []
 
-    for raw in raw_detections:
 
-        x1, y1, x2, y2 = raw["bbox"]
+    for detection in raw_detections:
 
-        confidence = raw["confidence"]
+        class_id = (
+            detection["class_id"]
+        )
 
-        class_id = raw["class_id"]
+        confidence = (
+            detection["confidence"]
+        )
+
+        x1, y1, x2, y2 = (
+            detection["bbox"]
+        )
+
 
         class_name = CLASS_NAMES.get(
             class_id,
             "Unknown Anomaly"
         )
+
 
         intel = get_intelligence(
             class_name,
@@ -672,120 +1120,166 @@ def process_image(
                 x1,
                 y1,
                 x2,
-                y2,
+                y2
             ]
         )
 
+
         detections.append({
-            "id": (
-                f"det-{uuid.uuid4().hex[:6]}"
-            ),
-            "className": class_name,
-            "category": intel["category"],
-            "confidence": round(
-                confidence,
-                2
-            ),
+
+            "id":
+                f"det-{uuid.uuid4().hex[:6]}",
+
+            "className":
+                class_name,
+
+            "category":
+                intel["category"],
+
+            "confidence":
+                round(
+                    confidence,
+                    2
+                ),
+
             "bbox": [
+
                 round(x1, 2),
+
                 round(y1, 2),
+
                 round(x2, 2),
-                round(y2, 2),
+
+                round(y2, 2)
             ],
-            "pixelDimensions": intel[
-                "pixel_dimensions"
-            ],
-            "priorityScore": intel[
-                "priority_score"
-            ],
-            "priorityLevel": intel[
-                "priority_level"
-            ],
-            "ecoImpact": intel[
-                "eco_impact"
-            ],
-            "actionRecommended": intel[
-                "action_recommended"
-            ],
-            "verificationStatus": "unreviewed",
-            "timestamp": datetime.utcnow().isoformat(),
+
+            "pixelDimensions":
+                intel[
+                    "pixel_dimensions"
+                ],
+
+            "priorityScore":
+                intel[
+                    "priority_score"
+                ],
+
+            "priorityLevel":
+                intel[
+                    "priority_level"
+                ],
+
+            "ecoImpact":
+                intel[
+                    "eco_impact"
+                ],
+
+            "actionRecommended":
+                intel[
+                    "action_recommended"
+                ],
+
+            "verificationStatus":
+                "unreviewed",
+
+            "timestamp":
+                datetime.utcnow().isoformat()
         })
 
 
     # --------------------------------------------------------
-    # ANNOTATED IMAGE
+    # ANNOTATION
     # --------------------------------------------------------
 
-    annotated_pil = create_annotated_image(
-        image,
-        raw_detections
+    annotated_pil = (
+        create_annotated_image(
+            image,
+            raw_detections
+        )
     )
+
 
     orig_path = os.path.join(
         OUTPUTS_DIR,
         f"{scan_id}.jpg"
     )
 
+
     annotated_path = os.path.join(
         OUTPUTS_DIR,
         f"{scan_id}_annotated.jpg"
     )
 
+
     image.save(
         orig_path,
         format="JPEG",
-        quality=90
+        quality=88
     )
+
 
     annotated_pil.save(
         annotated_path,
         format="JPEG",
-        quality=90
+        quality=88
     )
+
 
     image_url = (
-        f"{BACKEND_PUBLIC_URL}/outputs/"
-        f"{scan_id}.jpg"
+        f"{BACKEND_PUBLIC_URL}"
+        f"/outputs/{scan_id}.jpg"
     )
 
+
     annotated_image_url = (
-        f"{BACKEND_PUBLIC_URL}/outputs/"
+        f"{BACKEND_PUBLIC_URL}"
+        f"/outputs/"
         f"{scan_id}_annotated.jpg"
     )
 
 
     # --------------------------------------------------------
-    # BASE64 IMAGES
+    # BASE64
     # --------------------------------------------------------
 
     buffer = io.BytesIO()
 
+
     annotated_pil.save(
         buffer,
         format="JPEG",
-        quality=85
+        quality=82
     )
+
 
     annotated_base64 = (
         "data:image/jpeg;base64,"
-        + base64.b64encode(
+        +
+        base64.b64encode(
             buffer.getvalue()
-        ).decode("utf-8")
+        ).decode(
+            "utf-8"
+        )
     )
 
+
     orig_buffer = io.BytesIO()
+
 
     image.save(
         orig_buffer,
         format="JPEG",
-        quality=80
+        quality=78
     )
+
 
     orig_base64 = (
         "data:image/jpeg;base64,"
-        + base64.b64encode(
+        +
+        base64.b64encode(
             orig_buffer.getvalue()
-        ).decode("utf-8")
+        ).decode(
+            "utf-8"
+        )
     )
 
 
@@ -802,6 +1296,7 @@ def process_image(
             )
         )
 
+
         final_detections = (
             quality_analysis.get(
                 "enriched_detections",
@@ -809,270 +1304,386 @@ def process_image(
             )
         )
 
+
         sq = quality_analysis[
             "sonar_quality"
         ]
+
 
         ea = quality_analysis[
             "evidence_assessment"
         ]
 
-        # Frontend-compatible fields
+
         for det in final_detections:
 
             if "acoustic_shadow" in det:
 
-                det["shadowMetrics"] = {
+                shadow = (
+                    det[
+                        "acoustic_shadow"
+                    ]
+                )
+
+
+                det[
+                    "shadowMetrics"
+                ] = {
+
                     "shadowDetected":
-                        det["acoustic_shadow"].get(
+                        shadow.get(
                             "shadow_detected",
                             False
                         ),
 
                     "shadowContrastRatio":
-                        det["acoustic_shadow"].get(
+                        shadow.get(
                             "shadow_contrast_ratio",
                             1.0
                         ),
 
                     "evidenceStrength":
-                        det["acoustic_shadow"].get(
+                        shadow.get(
                             "evidence_strength",
                             "ABSENT"
                         ),
 
                     "description":
-                        det["acoustic_shadow"].get(
+                        shadow.get(
                             "description",
                             ""
-                        ),
+                        )
                 }
 
-            det["evidenceScore"] = det.get(
+
+            det[
+                "evidenceScore"
+            ] = det.get(
                 "evidence_score",
                 ea["evidence_score"]
             )
 
-            det["reliability"] = det.get(
+
+            det[
+                "reliability"
+            ] = det.get(
                 "reliability",
                 ea["reliability"]
             )
 
-            det["reviewRequired"] = det.get(
+
+            det[
+                "reviewRequired"
+            ] = det.get(
                 "review_required",
                 ea["review_required"]
             )
 
-            det["reviewReasons"] = det.get(
+
+            det[
+                "reviewReasons"
+            ] = det.get(
                 "review_reasons",
                 ea["review_reasons"]
             )
 
 
         sonar_quality_payload = {
+
             "speckleNoise": {
+
                 "speckleIndex":
-                    sq["speckle_noise"][
+                    sq[
+                        "speckle_noise"
+                    ][
                         "speckle_index"
                     ],
 
                 "speckleLevel":
-                    sq["speckle_noise"][
+                    sq[
+                        "speckle_noise"
+                    ][
                         "speckle_level"
                     ],
 
                 "enl":
-                    sq["speckle_noise"]["enl"],
+                    sq[
+                        "speckle_noise"
+                    ][
+                        "enl"
+                    ],
 
                 "score":
-                    sq["speckle_noise"]["score"],
+                    sq[
+                        "speckle_noise"
+                    ][
+                        "score"
+                    ],
 
                 "description":
-                    sq["speckle_noise"][
+                    sq[
+                        "speckle_noise"
+                    ][
                         "description"
-                    ],
+                    ]
             },
 
+
             "resolutionQuality": {
+
                 "width":
-                    sq["resolution_quality"][
+                    sq[
+                        "resolution_quality"
+                    ][
                         "width"
                     ],
 
                 "height":
-                    sq["resolution_quality"][
+                    sq[
+                        "resolution_quality"
+                    ][
                         "height"
                     ],
 
                 "sharpnessScore":
-                    sq["resolution_quality"][
+                    sq[
+                        "resolution_quality"
+                    ][
                         "sharpness_score"
                     ],
 
                 "laplacianVariance":
-                    sq["resolution_quality"][
+                    sq[
+                        "resolution_quality"
+                    ][
                         "laplacian_variance"
                     ],
 
                 "meanGradient":
-                    sq["resolution_quality"][
+                    sq[
+                        "resolution_quality"
+                    ][
                         "mean_gradient"
                     ],
 
                 "contrastScore":
-                    sq["resolution_quality"][
+                    sq[
+                        "resolution_quality"
+                    ][
                         "contrast_score"
                     ],
 
                 "dynamicRange":
-                    sq["resolution_quality"][
+                    sq[
+                        "resolution_quality"
+                    ][
                         "dynamic_range"
                     ],
 
                 "qualityRating":
-                    sq["resolution_quality"][
+                    sq[
+                        "resolution_quality"
+                    ][
                         "quality_rating"
                     ],
 
                 "compositeScore":
-                    sq["overall_quality"][
+                    sq[
+                        "overall_quality"
+                    ][
                         "composite_score"
                     ],
 
                 "description":
-                    sq["overall_quality"][
+                    sq[
+                        "overall_quality"
+                    ][
                         "description"
                     ],
 
                 "disclaimer":
-                    sq["resolution_quality"][
+                    sq[
+                        "resolution_quality"
+                    ][
                         "disclaimer"
-                    ],
+                    ]
             },
 
+
             "acousticShadow": {
+
                 "shadowDetected":
-                    sq["acoustic_shadow"][
+                    sq[
+                        "acoustic_shadow"
+                    ][
                         "shadow_detected"
                     ],
 
                 "shadowContrastRatio":
-                    sq["acoustic_shadow"][
+                    sq[
+                        "acoustic_shadow"
+                    ][
                         "shadow_contrast_ratio"
                     ],
 
                 "evidenceStrength":
-                    sq["acoustic_shadow"][
+                    sq[
+                        "acoustic_shadow"
+                    ][
                         "evidence_strength"
                     ],
 
                 "description":
-                    sq["acoustic_shadow"][
+                    sq[
+                        "acoustic_shadow"
+                    ][
                         "description"
                     ],
 
                 "methodology":
-                    sq["acoustic_shadow"][
+                    sq[
+                        "acoustic_shadow"
+                    ][
                         "methodology"
-                    ],
+                    ]
             },
 
+
             "motionDropout": {
+
                 "dropoutDetected":
-                    sq["dropout_artifact"][
+                    sq[
+                        "dropout_artifact"
+                    ][
                         "dropout_detected"
                     ],
 
                 "dropoutCount":
-                    sq["dropout_artifact"][
+                    sq[
+                        "dropout_artifact"
+                    ][
                         "dropout_count"
                     ],
 
                 "dropoutPercentage":
-                    sq["dropout_artifact"][
+                    sq[
+                        "dropout_artifact"
+                    ][
                         "dropout_percentage"
                     ],
 
                 "artifactSeverity":
-                    sq["dropout_artifact"][
+                    sq[
+                        "dropout_artifact"
+                    ][
                         "artifact_severity"
                     ],
 
                 "rowJitterMean":
-                    sq["dropout_artifact"][
+                    sq[
+                        "dropout_artifact"
+                    ][
                         "row_jitter_mean"
                     ],
 
                 "detectedArtifacts":
-                    sq["dropout_artifact"][
+                    sq[
+                        "dropout_artifact"
+                    ][
                         "detected_artifacts"
                     ],
 
                 "description":
-                    sq["dropout_artifact"][
+                    sq[
+                        "dropout_artifact"
+                    ][
                         "description"
                     ],
 
                 "disclaimer":
-                    sq["dropout_artifact"][
+                    sq[
+                        "dropout_artifact"
+                    ][
                         "disclaimer"
-                    ],
-            },
+                    ]
+            }
         }
 
 
         evidence_assessment_payload = {
+
             "evidenceScore":
-                ea["evidence_score"],
+                ea[
+                    "evidence_score"
+                ],
 
             "reliability":
-                ea["reliability"],
+                ea[
+                    "reliability"
+                ],
 
             "reviewRequired":
-                ea["review_required"],
+                ea[
+                    "review_required"
+                ],
 
             "reviewReasons":
-                ea["review_reasons"],
+                ea[
+                    "review_reasons"
+                ],
 
             "components":
-                ea["components"],
+                ea[
+                    "components"
+                ]
         }
 
-    except Exception as q_err:
+
+    except Exception as error:
 
         print(
-            f"Warning: Sonar quality analysis failed: "
-            f"{q_err}"
+            "Sonar quality analysis "
+            f"failed: {error}"
         )
 
+
         final_detections = detections
+
         sonar_quality_payload = None
+
         evidence_assessment_payload = None
+
         sq = None
+
         ea = None
 
 
     # --------------------------------------------------------
-    # SCAN DATA
+    # SCAN RESPONSE
     # --------------------------------------------------------
 
     scan_data = {
-        "id": scan_id,
 
-        "filename": filename,
+        "id":
+            scan_id,
 
-        "fileSizeMB": (
-            file_size_mb
-            if file_size_mb > 0
-            else 0.01
-        ),
+        "filename":
+            filename,
+
+        "fileSizeMB":
+            file_size_mb or 0.01,
 
         "resolution": {
-            "width": width,
-            "height": height,
+
+            "width":
+                width,
+
+            "height":
+                height
         },
 
-        "imageUrl": image_url,
+        "imageUrl":
+            image_url,
 
         "annotatedImageUrl":
             annotated_image_url,
@@ -1113,23 +1724,24 @@ def process_image(
             ),
 
         "modelVersion":
-            "YOLO11n ONNX (best.onnx)",
+            "YOLO11n (best.onnx)",
 
         "isSample":
             False,
 
         "success":
-            True,
+            True
     }
 
 
     # --------------------------------------------------------
-    # SAVE TO DATABASE
+    # DATABASE
     # --------------------------------------------------------
 
     try:
 
         database.save_scan(
+
             {
                 "id":
                     scan_id,
@@ -1142,8 +1754,11 @@ def process_image(
 
                 "resolution":
                     {
-                        "width": width,
-                        "height": height,
+                        "width":
+                            width,
+
+                        "height":
+                            height
                     },
 
                 "image_url":
@@ -1153,13 +1768,19 @@ def process_image(
                     annotated_image_url,
 
                 "processed_at":
-                    scan_data["processedAt"],
+                    scan_data[
+                        "processedAt"
+                    ],
 
                 "processing_time_ms":
-                    scan_data["processingTimeMs"],
+                    scan_data[
+                        "processingTimeMs"
+                    ],
 
                 "model_version":
-                    scan_data["modelVersion"],
+                    scan_data[
+                        "modelVersion"
+                    ],
 
                 "sonarQuality":
                     scan_data.get(
@@ -1169,23 +1790,29 @@ def process_image(
                 "evidenceAssessment":
                     scan_data.get(
                         "evidenceAssessment"
-                    ),
+                    )
             },
+
             final_detections
         )
 
-    except Exception as e:
+    except Exception as error:
 
         print(
-            f"Error saving to database: {e}"
+            f"Error saving to database: "
+            f"{error}"
         )
+
+
+    # Free some memory
+    gc.collect()
 
 
     return scan_data
 
 
 # ============================================================
-# SINGLE IMAGE
+# SINGLE PREDICT
 # ============================================================
 
 @app.post("/predict")
@@ -1202,7 +1829,7 @@ async def predict_single(
 
 
 # ============================================================
-# BATCH IMAGE
+# BATCH PREDICT
 # ============================================================
 
 @app.post("/predict-batch")
@@ -1211,6 +1838,7 @@ async def predict_batch(
 ):
 
     scans = []
+
 
     for file in files:
 
@@ -1221,7 +1849,12 @@ async def predict_batch(
             file.filename
         )
 
-        scans.append(scan)
+        scans.append(
+            scan
+        )
+
+        gc.collect()
+
 
     return scans
 
@@ -1257,7 +1890,10 @@ def delete_single_scan(
     )
 
     return {
-        "status": "SUCCESS",
+
+        "status":
+            "SUCCESS",
+
         "message":
             f"Scan {scan_id} deleted successfully."
     }
@@ -1273,7 +1909,10 @@ def clear_all_history():
     database.clear_all_scans()
 
     return {
-        "status": "SUCCESS",
+
+        "status":
+            "SUCCESS",
+
         "message":
             "All scan history cleared successfully."
     }
@@ -1285,9 +1924,13 @@ def clear_all_history():
 
 @app.post("/feedback")
 async def record_feedback(
+
     scan_id: str = Form(...),
+
     detection_id: str = Form(...),
+
     status: str = Form(...),
+
     notes: str = Form("")
 ):
 
@@ -1295,7 +1938,9 @@ async def record_feedback(
         f"hitl-{uuid.uuid4().hex[:8]}"
     )
 
+
     feedback = {
+
         "id":
             feedback_id,
 
@@ -1324,19 +1969,22 @@ async def record_feedback(
             "Hydrographic Operator",
 
         "timestamp":
-            datetime.utcnow().isoformat(),
+            datetime.utcnow().isoformat()
     }
+
 
     database.record_hitl_feedback(
         feedback
     )
 
+
     return {
+
         "status":
             "SUCCESS",
 
         "feedback_id":
-            feedback_id,
+            feedback_id
     }
 
 
@@ -1349,8 +1997,11 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
+
         app,
+
         host="0.0.0.0",
+
         port=int(
             os.getenv(
                 "PORT",
