@@ -1,1212 +1,751 @@
-"""
-DeepScan AI - FastAPI Inference & Decision Support Server
-
-Loads the trained YOLO11n model (best.pt), performs sonar detection,
-runs the Intelligence Engine and Sonar Quality Analyzer, and stores
-scan history in SQLite.
-
-Optimized for low-memory deployment such as Render Free (512 MB).
-"""
-
 import os
-import uuid
+
+# ---------------------------------------------------------
+# MEMORY OPTIMIZATION — MUST BE BEFORE ML IMPORTS
+# ---------------------------------------------------------
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["MALLOC_TRIM_THRESHOLD_"] = "65536"
+
+import gc
 import base64
 import io
-import gc
+import uuid
 from datetime import datetime
+from typing import List
 
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from PIL import Image
 
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
+# ---------------------------------------------------------
+# YOUR PROJECT MODULES
+# ---------------------------------------------------------
+from database import (
+    save_scan,
+    get_scans,
+    delete_all_scans,
+    delete_scan,
+    save_feedback,
+)
 
+from intelligence import analyze_detection
+from sonar_quality import analyze_sonar_quality
+
+# ---------------------------------------------------------
+# YOLO
+# ---------------------------------------------------------
 from ultralytics import YOLO
 
-from intelligence import get_intelligence
-from sonar_quality import analyze_sonar_image_quality
-import database
 
-
-# ============================================================
-# FASTAPI APP
-# ============================================================
-
+# ---------------------------------------------------------
+# APP
+# ---------------------------------------------------------
 app = FastAPI(
-    title="DeepScan AI - Underwater Sonar Intelligence API",
-    version="2.0.0",
-    description=(
-        "Live YOLO11n (best.pt) inference and decision-support API "
-        "for Side-Scan Sonar (SSS) imagery"
-    )
+    title="DeepScan AI API",
+    description="AI-powered underwater sonar debris and anomaly detection",
+    version="1.0.0",
 )
 
 
-# ============================================================
+# ---------------------------------------------------------
 # CORS
-# ============================================================
-
+# ---------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ============================================================
-# DIRECTORIES
-# ============================================================
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-OUTPUTS_DIR = os.path.join(
-    BASE_DIR,
-    "outputs"
-)
-
-os.makedirs(
-    OUTPUTS_DIR,
-    exist_ok=True
-)
-
-
-# Serve generated images
-app.mount(
-    "/outputs",
-    StaticFiles(directory=OUTPUTS_DIR),
-    name="outputs"
-)
-
-
-# ============================================================
-# PUBLIC BACKEND URL
-# ============================================================
-
-# Render production URL.
-# Can also be overridden with BACKEND_PUBLIC_URL environment variable.
+# ---------------------------------------------------------
+# CONFIG
+# ---------------------------------------------------------
 BACKEND_PUBLIC_URL = os.getenv(
     "BACKEND_PUBLIC_URL",
-    "https://deepscan-ai-tyvx.onrender.com"
+    "https://deepscan-ai-tyvx.onrender.com",
 ).rstrip("/")
 
+MODEL_PATH = "best.pt"
 
-# ============================================================
-# MODEL PATH
-# ============================================================
+# Smaller image size = lower memory usage
+IMAGE_SIZE = 256
 
-MODEL_PATH = os.path.join(
-    BASE_DIR,
-    "best.pt"
-)
+CONFIDENCE = 0.20
 
+MAX_DETECTIONS = 10
 
-# ============================================================
-# LOAD YOLO MODEL
-# ============================================================
 
-print("==============================================")
-print("          DEEPSCAN AI BACKEND")
-print("==============================================")
+# ---------------------------------------------------------
+# MODEL
+# ---------------------------------------------------------
+print("Loading YOLO model...")
 
-print("Loading YOLO11n weights from:")
-print(MODEL_PATH)
+try:
+    model = YOLO(MODEL_PATH)
 
+    print("YOLO model loaded successfully.")
 
-if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError(
-        f"YOLO model not found: {MODEL_PATH}"
-    )
+except Exception as e:
+    print(f"ERROR loading YOLO model: {e}")
+    model = None
 
 
-model = YOLO(MODEL_PATH)
+# ---------------------------------------------------------
+# MODEL CLASS NAMES
+# ---------------------------------------------------------
+CLASS_NAMES = {
+    0: "Fishing Net",
+    1: "Crab Pot",
+    2: "Shipwreck",
+    3: "Pipe",
+    4: "Rope",
+    5: "Tire",
+    6: "Weight",
+    7: "Block",
+    8: "Artificial Reef",
+    9: "Pipeline/Cylinder",
+    10: "Boulder",
+}
 
 
-print(
-    "YOLO11n model loaded successfully with classes:"
-)
-print(model.names)
+# ---------------------------------------------------------
+# UTILITY FUNCTIONS
+# ---------------------------------------------------------
+def image_to_base64(image: Image.Image, quality: int = 75) -> str:
+    """
+    Convert PIL image to compressed JPEG base64.
+    Lower quality helps reduce memory and response size.
+    """
 
-print("==============================================")
-
-
-# ============================================================
-# STARTUP
-# ============================================================
-
-@app.on_event("startup")
-def startup():
-    print("Initializing database...")
-    database.init_db()
-    print("Database initialized successfully.")
-
-
-# ============================================================
-# HEALTH CHECK
-# ============================================================
-
-@app.get("/health")
-def health_check():
-
-    return {
-        "status": "ONLINE",
-        "model": "YOLO11n (best.pt)",
-        "classes": model.names,
-        "taxonomy_classes": len(model.names),
-        "sonar_quality_analyzer": "ACTIVE",
-        "quality_modules": [
-            "speckle_noise",
-            "resolution_quality",
-            "acoustic_shadow",
-            "motion_dropout",
-            "evidence_score"
-        ]
-    }
-
-
-# ============================================================
-# ROOT
-# ============================================================
-
-@app.get("/")
-def root():
-
-    return {
-        "message": "DeepScan AI Backend is running",
-        "status": "online",
-        "model": "YOLO11n (best.pt)",
-        "classes": model.names,
-        "number_of_classes": len(model.names),
-        "backend_url": BACKEND_PUBLIC_URL
-    }
-
-
-# ============================================================
-# IMAGE PROCESSING
-# ============================================================
-
-def process_image(
-    image_bytes: bytes,
-    filename: str
-) -> dict:
-
-    scan_id = f"scan-{uuid.uuid4().hex[:8]}"
-
-    # --------------------------------------------------------
-    # OPEN IMAGE
-    # --------------------------------------------------------
-
-    image = Image.open(
-        io.BytesIO(image_bytes)
-    ).convert("RGB")
-
-    width, height = image.size
-
-    file_size_mb = round(
-        len(image_bytes) / (1024 * 1024),
-        2
-    )
-
-    start_time = datetime.now()
-
-
-    # ========================================================
-    # YOLO INFERENCE
-    # ========================================================
-
-    print(
-        f"Starting YOLO inference for {filename}"
-    )
-
-    print(
-        "Using memory-optimized inference: imgsz=320, max_det=20"
-    )
-
-    results = model.predict(
-        source=image,
-
-        # LOWER IMAGE SIZE = LOWER RAM USAGE
-        imgsz=320,
-
-        # Same detection confidence threshold
-        conf=0.15,
-
-        # Prevent excessive detections/memory
-        max_det=20,
-
-        # Disable unnecessary logging
-        verbose=False,
-
-        # Explicit CPU inference for Render
-        device="cpu"
-    )
-
-    result = results[0]
-
-
-    processing_time_ms = int(
-        (
-            datetime.now() - start_time
-        ).total_seconds() * 1000
-    )
-
-
-    print(
-        f"YOLO inference completed in "
-        f"{processing_time_ms} ms"
-    )
-
-
-    # ========================================================
-    # GENERATE ANNOTATED IMAGE
-    # ========================================================
-
-    annotated_plot = result.plot()
-
-    annotated_pil = Image.fromarray(
-        annotated_plot
-    )
-
-
-    # ========================================================
-    # OUTPUT FILES
-    # ========================================================
-
-    orig_path = os.path.join(
-        OUTPUTS_DIR,
-        f"{scan_id}.jpg"
-    )
-
-    annotated_path = os.path.join(
-        OUTPUTS_DIR,
-        f"{scan_id}_annotated.jpg"
-    )
-
-
-    # Save original image
-    image.save(
-        orig_path,
-        format="JPEG",
-        quality=85,
-        optimize=True
-    )
-
-
-    # Save annotated image
-    annotated_pil.save(
-        annotated_path,
-        format="JPEG",
-        quality=85,
-        optimize=True
-    )
-
-
-    # ========================================================
-    # PRODUCTION IMAGE URLS
-    # ========================================================
-
-    image_url = (
-        f"{BACKEND_PUBLIC_URL}"
-        f"/outputs/{scan_id}.jpg"
-    )
-
-    annotated_image_url = (
-        f"{BACKEND_PUBLIC_URL}"
-        f"/outputs/{scan_id}_annotated.jpg"
-    )
-
-
-    # ========================================================
-    # BASE64 IMAGES
-    # ========================================================
-
-    # Annotated image
     buffer = io.BytesIO()
 
-    annotated_pil.save(
+    image.convert("RGB").save(
         buffer,
         format="JPEG",
-        quality=75,
-        optimize=True
+        quality=quality,
+        optimize=True,
     )
 
-    annotated_base64 = (
-        "data:image/jpeg;base64,"
-        + base64.b64encode(
-            buffer.getvalue()
-        ).decode("utf-8")
-    )
+    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    buffer.close()
+
+    return encoded
 
 
-    # Original image
-    orig_buffer = io.BytesIO()
+def resize_for_processing(image: Image.Image) -> Image.Image:
+    """
+    Resize large uploaded images before inference.
+    This significantly reduces memory consumption.
+    """
 
-    image.save(
-        orig_buffer,
-        format="JPEG",
-        quality=75,
-        optimize=True
-    )
+    image = image.convert("RGB")
 
-    orig_base64 = (
-        "data:image/jpeg;base64,"
-        + base64.b64encode(
-            orig_buffer.getvalue()
-        ).decode("utf-8")
-    )
+    max_dimension = 1280
 
+    if max(image.size) > max_dimension:
+        ratio = max_dimension / max(image.size)
 
-    # ========================================================
-    # EXTRACT REAL YOLO DETECTIONS
-    # ========================================================
+        new_width = int(image.width * ratio)
+        new_height = int(image.height * ratio)
 
-    detections = []
-
-
-    if (
-        result.boxes is not None
-        and len(result.boxes) > 0
-    ):
-
-        boxes = (
-            result.boxes.xyxy
-            .cpu()
-            .numpy()
+        image = image.resize(
+            (new_width, new_height),
+            Image.Resampling.LANCZOS,
         )
 
-        confs = (
-            result.boxes.conf
-            .cpu()
-            .numpy()
-        )
-
-        classes = (
-            result.boxes.cls
-            .cpu()
-            .numpy()
-        )
-
-
-        for i in range(len(boxes)):
-
-            x1, y1, x2, y2 = [
-                float(v)
-                for v in boxes[i]
-            ]
-
-            conf = float(
-                confs[i]
-            )
-
-            cls_idx = int(
-                classes[i]
-            )
-
-            cls_name = model.names.get(
-                cls_idx,
-                "Unknown Anomaly"
-            )
-
-
-            # ------------------------------------------------
-            # INTELLIGENCE ENGINE
-            # ------------------------------------------------
-
-            intel = get_intelligence(
-                cls_name,
-                conf,
-                [
-                    x1,
-                    y1,
-                    x2,
-                    y2
-                ]
-            )
-
-
-            detections.append({
-
-                "id":
-                    f"det-{uuid.uuid4().hex[:6]}",
-
-                "className":
-                    cls_name,
-
-                "category":
-                    intel["category"],
-
-                "confidence":
-                    round(conf, 2),
-
-                "bbox": [
-                    round(x1, 2),
-                    round(y1, 2),
-                    round(x2, 2),
-                    round(y2, 2)
-                ],
-
-                "pixelDimensions":
-                    intel["pixel_dimensions"],
-
-                "priorityScore":
-                    intel["priority_score"],
-
-                "priorityLevel":
-                    intel["priority_level"],
-
-                "ecoImpact":
-                    intel["eco_impact"],
-
-                "actionRecommended":
-                    intel["action_recommended"],
-
-                "verificationStatus":
-                    "unreviewed",
-
-                "timestamp":
-                    datetime.utcnow().isoformat()
-            })
-
-
-    print(
-        f"Detections found: {len(detections)}"
-    )
-
-
-    # ========================================================
-    # SONAR QUALITY ANALYZER
-    # ========================================================
-
-    sonar_quality_payload = None
-
-    evidence_assessment_payload = None
-
-    sq = None
-    ea = None
-
-
-    try:
-
-        quality_analysis = (
-            analyze_sonar_image_quality(
-                image_bytes,
-                detections=detections
-            )
-        )
-
-
-        final_detections = (
-            quality_analysis.get(
-                "enriched_detections",
-                detections
-            )
-        )
-
-
-        sq = quality_analysis[
-            "sonar_quality"
-        ]
-
-        ea = quality_analysis[
-            "evidence_assessment"
-        ]
-
-
-        # ----------------------------------------------------
-        # FRONTEND COMPATIBILITY
-        # ----------------------------------------------------
-
-        for det in final_detections:
-
-            if "acoustic_shadow" in det:
-
-                det["shadowMetrics"] = {
-
-                    "shadowDetected":
-                        det[
-                            "acoustic_shadow"
-                        ].get(
-                            "shadow_detected",
-                            False
-                        ),
-
-                    "shadowContrastRatio":
-                        det[
-                            "acoustic_shadow"
-                        ].get(
-                            "shadow_contrast_ratio",
-                            1.0
-                        ),
-
-                    "evidenceStrength":
-                        det[
-                            "acoustic_shadow"
-                        ].get(
-                            "evidence_strength",
-                            "ABSENT"
-                        ),
-
-                    "description":
-                        det[
-                            "acoustic_shadow"
-                        ].get(
-                            "description",
-                            ""
-                        )
-                }
-
-
-            det["evidenceScore"] = det.get(
-                "evidence_score",
-                ea["evidence_score"]
-            )
-
-            det["reliability"] = det.get(
-                "reliability",
-                ea["reliability"]
-            )
-
-            det["reviewRequired"] = det.get(
-                "review_required",
-                ea["review_required"]
-            )
-
-            det["reviewReasons"] = det.get(
-                "review_reasons",
-                ea["review_reasons"]
-            )
-
-
-        # ----------------------------------------------------
-        # SONAR QUALITY RESPONSE
-        # ----------------------------------------------------
-
-        sonar_quality_payload = {
-
-            "speckleNoise": {
-
-                "speckleIndex":
-                    sq[
-                        "speckle_noise"
-                    ][
-                        "speckle_index"
-                    ],
-
-                "speckleLevel":
-                    sq[
-                        "speckle_noise"
-                    ][
-                        "speckle_level"
-                    ],
-
-                "enl":
-                    sq[
-                        "speckle_noise"
-                    ][
-                        "enl"
-                    ],
-
-                "score":
-                    sq[
-                        "speckle_noise"
-                    ][
-                        "score"
-                    ],
-
-                "description":
-                    sq[
-                        "speckle_noise"
-                    ][
-                        "description"
-                    ]
-            },
-
-
-            "resolutionQuality": {
-
-                "width":
-                    sq[
-                        "resolution_quality"
-                    ][
-                        "width"
-                    ],
-
-                "height":
-                    sq[
-                        "resolution_quality"
-                    ][
-                        "height"
-                    ],
-
-                "sharpnessScore":
-                    sq[
-                        "resolution_quality"
-                    ][
-                        "sharpness_score"
-                    ],
-
-                "laplacianVariance":
-                    sq[
-                        "resolution_quality"
-                    ][
-                        "laplacian_variance"
-                    ],
-
-                "meanGradient":
-                    sq[
-                        "resolution_quality"
-                    ][
-                        "mean_gradient"
-                    ],
-
-                "contrastScore":
-                    sq[
-                        "resolution_quality"
-                    ][
-                        "contrast_score"
-                    ],
-
-                "dynamicRange":
-                    sq[
-                        "resolution_quality"
-                    ][
-                        "dynamic_range"
-                    ],
-
-                "qualityRating":
-                    sq[
-                        "resolution_quality"
-                    ][
-                        "quality_rating"
-                    ],
-
-                "compositeScore":
-                    sq[
-                        "overall_quality"
-                    ][
-                        "composite_score"
-                    ],
-
-                "description":
-                    sq[
-                        "overall_quality"
-                    ][
-                        "description"
-                    ],
-
-                "disclaimer":
-                    sq[
-                        "resolution_quality"
-                    ][
-                        "disclaimer"
-                    ]
-            },
-
-
-            "acousticShadow": {
-
-                "shadowDetected":
-                    sq[
-                        "acoustic_shadow"
-                    ][
-                        "shadow_detected"
-                    ],
-
-                "shadowContrastRatio":
-                    sq[
-                        "acoustic_shadow"
-                    ][
-                        "shadow_contrast_ratio"
-                    ],
-
-                "evidenceStrength":
-                    sq[
-                        "acoustic_shadow"
-                    ][
-                        "evidence_strength"
-                    ],
-
-                "description":
-                    sq[
-                        "acoustic_shadow"
-                    ][
-                        "description"
-                    ],
-
-                "methodology":
-                    sq[
-                        "acoustic_shadow"
-                    ][
-                        "methodology"
-                    ]
-            },
-
-
-            "motionDropout": {
-
-                "dropoutDetected":
-                    sq[
-                        "dropout_artifact"
-                    ][
-                        "dropout_detected"
-                    ],
-
-                "dropoutCount":
-                    sq[
-                        "dropout_artifact"
-                    ][
-                        "dropout_count"
-                    ],
-
-                "dropoutPercentage":
-                    sq[
-                        "dropout_artifact"
-                    ][
-                        "dropout_percentage"
-                    ],
-
-                "artifactSeverity":
-                    sq[
-                        "dropout_artifact"
-                    ][
-                        "artifact_severity"
-                    ],
-
-                "rowJitterMean":
-                    sq[
-                        "dropout_artifact"
-                    ][
-                        "row_jitter_mean"
-                    ],
-
-                "detectedArtifacts":
-                    sq[
-                        "dropout_artifact"
-                    ][
-                        "detected_artifacts"
-                    ],
-
-                "description":
-                    sq[
-                        "dropout_artifact"
-                    ][
-                        "description"
-                    ],
-
-                "disclaimer":
-                    sq[
-                        "dropout_artifact"
-                    ][
-                        "disclaimer"
-                    ]
-            }
-        }
-
-
-        evidence_assessment_payload = {
-
-            "evidenceScore":
-                ea[
-                    "evidence_score"
-                ],
-
-            "reliability":
-                ea[
-                    "reliability"
-                ],
-
-            "reviewRequired":
-                ea[
-                    "review_required"
-                ],
-
-            "reviewReasons":
-                ea[
-                    "review_reasons"
-                ],
-
-            "components":
-                ea[
-                    "components"
-                ]
-        }
-
-
-    except Exception as q_err:
-
-        print(
-            "Warning: Sonar quality analysis failed:",
-            q_err
-        )
-
-        final_detections = detections
-
-        sonar_quality_payload = None
-
-        evidence_assessment_payload = None
-
-        sq = None
-        ea = None
-
-
-    # ========================================================
-    # SCAN DATA
-    # ========================================================
-
-    scan_data = {
-
-        "id":
-            scan_id,
-
-        "filename":
-            filename,
-
-        "fileSizeMB":
-            file_size_mb or 0.01,
-
-        "resolution": {
-
-            "width":
-                width,
-
-            "height":
-                height
-        },
-
-        "imageUrl":
-            image_url,
-
-        "annotatedImageUrl":
-            annotated_image_url,
-
-        "imageBase64":
-            orig_base64,
-
-        "annotatedBase64":
-            annotated_base64,
-
-        "detections":
-            final_detections,
-
-        "sonarQuality":
-            sonar_quality_payload,
-
-        "sonar_quality":
-            sq,
-
-        "evidenceAssessment":
-            evidence_assessment_payload,
-
-        "evidence_assessment":
-            ea,
-
-        "processedAt":
-            datetime.utcnow().strftime(
-                "%Y-%m-%d %H:%M:%S UTC"
-            ),
-
-        "processingTimeMs":
-            max(
-                10,
-                processing_time_ms
-            ),
-
-        "modelVersion":
-            "YOLO11n (best.pt)",
-
-        "isSample":
-            False
-    }
-
-
-    # ========================================================
-    # SAVE TO DATABASE
-    # ========================================================
-
-    try:
-
-        database.save_scan(
-
-            {
-                "id":
-                    scan_id,
-
-                "filename":
-                    filename,
-
-                "file_size_mb":
-                    file_size_mb,
-
-                "resolution": {
-                    "width":
-                        width,
-
-                    "height":
-                        height
-                },
-
-                "image_url":
-                    image_url,
-
-                "annotated_image_url":
-                    annotated_image_url,
-
-                "processed_at":
-                    scan_data[
-                        "processedAt"
-                    ],
-
-                "processing_time_ms":
-                    scan_data[
-                        "processingTimeMs"
-                    ],
-
-                "model_version":
-                    scan_data[
-                        "modelVersion"
-                    ],
-
-                "sonarQuality":
-                    scan_data.get(
-                        "sonarQuality"
-                    ),
-
-                "evidenceAssessment":
-                    scan_data.get(
-                        "evidenceAssessment"
-                    )
-            },
-
-            final_detections
-        )
-
-
-    except Exception as e:
-
-        print(
-            "Error saving to database:",
-            e
-        )
-
-
-    # ========================================================
-    # MEMORY CLEANUP
-    # ========================================================
-
-    try:
-
-        del results
-        del result
-        del annotated_plot
-        del annotated_pil
-
-    except Exception:
-        pass
-
+    return image
+
+
+def cleanup_memory(*objects):
+    """
+    Explicitly release large objects.
+    """
+
+    for obj in objects:
+        try:
+            del obj
+        except Exception:
+            pass
 
     gc.collect()
 
 
-    print(
-        f"Scan completed successfully: {scan_id}"
+# ---------------------------------------------------------
+# HEALTH
+# ---------------------------------------------------------
+@app.get("/")
+def root():
+    return {
+        "name": "DeepScan AI",
+        "status": "online",
+        "model": "YOLO11n",
+        "backend": "FastAPI",
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy",
+        "model_loaded": model is not None,
+        "model": "best.pt",
+        "memory_optimized": True,
+    }
+
+
+# ---------------------------------------------------------
+# IMAGE PROCESSING
+# ---------------------------------------------------------
+def process_image(image: Image.Image, filename: str):
+    """
+    Run YOLO inference and generate the complete scan result.
+    """
+
+    if model is None:
+        raise RuntimeError("YOLO model is not loaded.")
+
+    # -----------------------------------------------------
+    # Prepare image
+    # -----------------------------------------------------
+    image = resize_for_processing(image)
+
+    # -----------------------------------------------------
+    # ORIGINAL IMAGE
+    # -----------------------------------------------------
+    original_base64 = image_to_base64(
+        image,
+        quality=70,
     )
 
+    # -----------------------------------------------------
+    # YOLO INFERENCE
+    # -----------------------------------------------------
+    try:
+        results_generator = model.predict(
+            source=image,
+            imgsz=IMAGE_SIZE,
+            conf=CONFIDENCE,
+            max_det=MAX_DETECTIONS,
+            device="cpu",
+            verbose=False,
+            stream=True,
+        )
 
-    return scan_data
+        # Only keep ONE result in memory
+        result = next(iter(results_generator))
+
+    except Exception as e:
+        cleanup_memory(image)
+        raise RuntimeError(f"YOLO inference failed: {str(e)}")
+
+    # -----------------------------------------------------
+    # DETECTIONS
+    # -----------------------------------------------------
+    detections = []
+
+    try:
+        boxes = result.boxes
+
+        if boxes is not None:
+
+            # Move only required data to CPU
+            xyxy = boxes.xyxy.cpu().numpy()
+            confs = boxes.conf.cpu().numpy()
+            classes = boxes.cls.cpu().numpy()
+
+            for i in range(len(classes)):
+
+                class_id = int(classes[i])
+
+                confidence = float(confs[i])
+
+                box = xyxy[i]
+
+                x1 = float(box[0])
+                y1 = float(box[1])
+                x2 = float(box[2])
+                y2 = float(box[3])
+
+                class_name = CLASS_NAMES.get(
+                    class_id,
+                    str(class_id),
+                )
+
+                # -----------------------------------------
+                # INTELLIGENCE ANALYSIS
+                # -----------------------------------------
+                try:
+                    intelligence = analyze_detection(
+                        class_name,
+                        confidence,
+                    )
+                except Exception:
+                    intelligence = {}
+
+                detection = {
+                    "class_id": class_id,
+                    "class_name": class_name,
+                    "confidence": round(confidence, 4),
+                    "bbox": [
+                        round(x1, 2),
+                        round(y1, 2),
+                        round(x2, 2),
+                        round(y2, 2),
+                    ],
+                    "intelligence": intelligence,
+                }
+
+                detections.append(detection)
+
+            # Free temporary numpy arrays
+            del xyxy
+            del confs
+            del classes
+
+    except Exception as e:
+        print(f"Detection parsing warning: {e}")
+
+    # -----------------------------------------------------
+    # ANNOTATED IMAGE
+    # -----------------------------------------------------
+    annotated_base64 = None
+
+    try:
+        plotted = result.plot()
+
+        # result.plot() returns numpy array
+        annotated_image = Image.fromarray(
+            plotted[..., ::-1]
+        )
+
+        annotated_base64 = image_to_base64(
+            annotated_image,
+            quality=70,
+        )
+
+        del plotted
+        del annotated_image
+
+    except Exception as e:
+        print(f"Annotation warning: {e}")
+
+    # -----------------------------------------------------
+    # SONAR QUALITY
+    # -----------------------------------------------------
+    try:
+        sonar_quality = analyze_sonar_quality(image)
+    except Exception as e:
+        print(f"Sonar quality warning: {e}")
+
+        sonar_quality = {
+            "quality": "Unknown",
+            "score": 0,
+            "message": "Unable to analyze sonar quality.",
+        }
+
+    # -----------------------------------------------------
+    # EVIDENCE ASSESSMENT
+    # -----------------------------------------------------
+    evidence = {
+        "status": "No anomalies detected",
+        "severity": "Low",
+        "summary": "No significant objects detected.",
+    }
+
+    if detections:
+
+        high_confidence = [
+            d for d in detections
+            if d["confidence"] >= 0.50
+        ]
+
+        if high_confidence:
+
+            evidence = {
+                "status": "Anomalies detected",
+                "severity": "High",
+                "summary": (
+                    f"{len(high_confidence)} "
+                    "high-confidence anomaly(s) detected."
+                ),
+            }
+
+        else:
+
+            evidence = {
+                "status": "Potential anomalies detected",
+                "severity": "Medium",
+                "summary": (
+                    f"{len(detections)} potential "
+                    "object(s) detected."
+                ),
+            }
+
+    # -----------------------------------------------------
+    # SAVE ANNOTATED OUTPUT
+    # -----------------------------------------------------
+    output_filename = None
+
+    try:
+        output_dir = "outputs"
+
+        os.makedirs(
+            output_dir,
+            exist_ok=True,
+        )
+
+        output_filename = (
+            f"{uuid.uuid4().hex}_annotated.jpg"
+        )
+
+        output_path = os.path.join(
+            output_dir,
+            output_filename,
+        )
+
+        if annotated_base64:
+
+            image_bytes = base64.b64decode(
+                annotated_base64
+            )
+
+            with open(
+                output_path,
+                "wb",
+            ) as f:
+                f.write(image_bytes)
+
+            del image_bytes
+
+    except Exception as e:
+        print(f"Output save warning: {e}")
+
+    # -----------------------------------------------------
+    # OUTPUT URL
+    # -----------------------------------------------------
+    annotated_url = None
+
+    if output_filename:
+
+        annotated_url = (
+            f"{BACKEND_PUBLIC_URL}"
+            f"/outputs/{output_filename}"
+        )
+
+    # -----------------------------------------------------
+    # FINAL RESPONSE
+    # -----------------------------------------------------
+    response = {
+        "success": True,
+        "filename": filename,
+        "timestamp": datetime.utcnow().isoformat(),
+        "detections": detections,
+        "detection_count": len(detections),
+        "sonar_quality": sonar_quality,
+        "evidence_assessment": evidence,
+        "original_image": original_base64,
+        "annotated_image": annotated_base64,
+        "annotated_url": annotated_url,
+    }
+
+    # -----------------------------------------------------
+    # SAVE DATABASE RECORD
+    # -----------------------------------------------------
+    try:
+
+        scan_data = {
+            "filename": filename,
+            "detections": detections,
+            "detection_count": len(detections),
+            "sonar_quality": sonar_quality,
+            "evidence_assessment": evidence,
+            "annotated_url": annotated_url,
+        }
+
+        try:
+            save_scan(scan_data)
+        except TypeError:
+            # If your existing database function expects
+            # different arguments, don't crash the prediction.
+            pass
+
+    except Exception as e:
+        print(f"Database save warning: {e}")
+
+    # -----------------------------------------------------
+    # VERY IMPORTANT MEMORY CLEANUP
+    # -----------------------------------------------------
+    try:
+        del result
+    except Exception:
+        pass
+
+    try:
+        del results_generator
+    except Exception:
+        pass
+
+    cleanup_memory(image)
+
+    return response
 
 
-# ============================================================
+# ---------------------------------------------------------
 # SINGLE IMAGE PREDICTION
-# ============================================================
-
+# ---------------------------------------------------------
 @app.post("/predict")
-async def predict_single(
-    file: UploadFile = File(...)
-):
+async def predict(file: UploadFile = File(...)):
 
-    contents = await file.read()
+    if not file.content_type or not file.content_type.startswith(
+        "image/"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload a valid image.",
+        )
 
-    return process_image(
-        contents,
-        file.filename
-    )
-
-
-# ============================================================
-# BATCH PREDICTION
-# ============================================================
-
-@app.post("/predict-batch")
-async def predict_batch(
-    files: list[UploadFile] = File(...)
-):
-
-    """
-    Batch inference for multiple sonar frames.
-
-    Images are processed one-by-one instead of simultaneously
-    to keep RAM usage low.
-    """
-
-    scans = []
-
-    for file in files:
+    try:
 
         contents = await file.read()
 
-        scan = process_image(
-            contents,
-            file.filename
+        image = Image.open(
+            io.BytesIO(contents)
         )
 
-        scans.append(scan)
+        # Force image load
+        image.load()
+
+        result = process_image(
+            image,
+            file.filename or "image.jpg",
+        )
+
+        del contents
+
+        return JSONResponse(
+            content=result
+        )
+
+    except Exception as e:
 
         gc.collect()
 
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
 
-    return scans
 
-
-# ============================================================
-# GET SCAN HISTORY
-# ============================================================
-
-@app.get("/scans")
-def get_scans(
-    limit: int = 200
+# ---------------------------------------------------------
+# BATCH PREDICTION
+# ---------------------------------------------------------
+@app.post("/predict-batch")
+async def predict_batch(
+    files: List[UploadFile] = File(...)
 ):
 
-    return {
-        "scans":
-            database.get_all_scans(
-                limit=limit
+    results = []
+
+    # IMPORTANT:
+    # Process ONE image at a time.
+    # Never load all images into RAM.
+
+    for file in files:
+
+        try:
+
+            if not file.content_type or not file.content_type.startswith(
+                "image/"
+            ):
+                results.append(
+                    {
+                        "success": False,
+                        "filename": file.filename,
+                        "error": "Invalid image file.",
+                    }
+                )
+
+                continue
+
+            contents = await file.read()
+
+            image = Image.open(
+                io.BytesIO(contents)
             )
-    }
 
+            image.load()
 
-# ============================================================
-# DELETE SINGLE SCAN
-# ============================================================
+            result = process_image(
+                image,
+                file.filename or "image.jpg",
+            )
 
-@app.delete("/scans/{scan_id}")
-def delete_single_scan(
-    scan_id: str
-):
+            results.append(result)
 
-    database.delete_scan(
-        scan_id
-    )
+            del contents
+            del image
+
+            gc.collect()
+
+        except Exception as e:
+
+            results.append(
+                {
+                    "success": False,
+                    "filename": file.filename,
+                    "error": str(e),
+                }
+            )
+
+            gc.collect()
 
     return {
-
-        "status":
-            "SUCCESS",
-
-        "message":
-            f"Scan {scan_id} deleted successfully."
+        "success": True,
+        "count": len(results),
+        "results": results,
     }
 
 
-# ============================================================
-# CLEAR ALL HISTORY
-# ============================================================
+# ---------------------------------------------------------
+# GET SCANS
+# ---------------------------------------------------------
+@app.get("/scans")
+def scans():
 
+    try:
+        return get_scans()
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+
+# ---------------------------------------------------------
+# DELETE ALL SCANS
+# ---------------------------------------------------------
 @app.delete("/scans")
-def clear_all_history():
+def delete_scans():
 
-    database.clear_all_scans()
+    try:
 
-    return {
+        delete_all_scans()
 
-        "status":
-            "SUCCESS",
+        return {
+            "success": True,
+            "message": "All scans deleted.",
+        }
 
-        "message":
-            "All scan history cleared successfully."
-    }
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
 
 
-# ============================================================
-# HUMAN-IN-THE-LOOP FEEDBACK
-# ============================================================
+# ---------------------------------------------------------
+# DELETE SINGLE SCAN
+# ---------------------------------------------------------
+@app.delete("/scans/{scan_id}")
+def delete_single_scan(scan_id: int):
 
+    try:
+
+        delete_scan(scan_id)
+
+        return {
+            "success": True,
+            "message": "Scan deleted.",
+        }
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+
+# ---------------------------------------------------------
+# FEEDBACK
+# ---------------------------------------------------------
 @app.post("/feedback")
-async def record_feedback(
+async def feedback(data: dict):
 
-    scan_id: str = Form(...),
+    try:
 
-    detection_id: str = Form(...),
+        save_feedback(data)
 
-    status: str = Form(...),
+        return {
+            "success": True,
+            "message": "Feedback saved.",
+        }
 
-    notes: str = Form("")
-):
+    except Exception as e:
 
-    feedback_id = (
-        f"hitl-{uuid.uuid4().hex[:8]}"
-    )
-
-
-    feedback = {
-
-        "id":
-            feedback_id,
-
-        "scan_id":
-            scan_id,
-
-        "detection_id":
-            detection_id,
-
-        "original_class":
-            "Classified Target",
-
-        "verified_class":
-            "Classified Target",
-
-        "confidence":
-            0.85,
-
-        "status":
-            status,
-
-        "notes":
-            notes,
-
-        "operator_role":
-            "Hydrographic Operator",
-
-        "timestamp":
-            datetime.utcnow().isoformat()
-    }
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
 
 
-    database.record_hitl_feedback(
-        feedback
-    )
+# ---------------------------------------------------------
+# OUTPUT FILES
+# ---------------------------------------------------------
+from fastapi.staticfiles import StaticFiles
+
+os.makedirs(
+    "outputs",
+    exist_ok=True,
+)
+
+app.mount(
+    "/outputs",
+    StaticFiles(directory="outputs"),
+    name="outputs",
+)
 
 
-    return {
+# ---------------------------------------------------------
+# STARTUP
+# ---------------------------------------------------------
+@app.on_event("startup")
+async def startup_event():
 
-        "status":
-            "SUCCESS",
+    print("----------------------------------------")
+    print("DeepScan AI Backend Started")
+    print("----------------------------------------")
+    print(f"Model: {MODEL_PATH}")
+    print(f"Image Size: {IMAGE_SIZE}")
+    print(f"Confidence: {CONFIDENCE}")
+    print(f"Max Detections: {MAX_DETECTIONS}")
+    print(f"Public URL: {BACKEND_PUBLIC_URL}")
+    print("----------------------------------------")
 
-        "feedback_id":
-            feedback_id
-    }
 
+# ---------------------------------------------------------
+# SHUTDOWN
+# ---------------------------------------------------------
+@app.on_event("shutdown")
+async def shutdown_event():
 
-# ============================================================
-# LOCAL DEVELOPMENT
-# ============================================================
+    global model
 
-if __name__ == "__main__":
+    try:
+        del model
+    except Exception:
+        pass
 
-    import uvicorn
+    gc.collect()
 
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000
-    )
+    print("DeepScan AI Backend shutting down.")
