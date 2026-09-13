@@ -1,18 +1,26 @@
 """
 DeepScan AI - FastAPI Inference & Decision Support Server
-Loads user's trained YOLO11n model (best.pt) and executes the rule-based Intelligence Engine.
+
+Loads the trained YOLO11n model (best.pt), performs sonar detection,
+runs the Intelligence Engine and Sonar Quality Analyzer, and stores
+scan history in SQLite.
+
+Optimized for low-memory deployment such as Render Free (512 MB).
 """
 
 import os
 import uuid
 import base64
 import io
+import gc
 from datetime import datetime
 
 from PIL import Image
+
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+
 from ultralytics import YOLO
 
 from intelligence import get_intelligence
@@ -20,12 +28,23 @@ from sonar_quality import analyze_sonar_image_quality
 import database
 
 
+# ============================================================
+# FASTAPI APP
+# ============================================================
+
 app = FastAPI(
     title="DeepScan AI - Underwater Sonar Intelligence API",
     version="2.0.0",
-    description="Live YOLO11n (best.pt) inference and decision-support API for Side-Scan Sonar (SSS) imagery"
+    description=(
+        "Live YOLO11n (best.pt) inference and decision-support API "
+        "for Side-Scan Sonar (SSS) imagery"
+    )
 )
 
+
+# ============================================================
+# CORS
+# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,13 +55,24 @@ app.add_middleware(
 )
 
 
+# ============================================================
+# DIRECTORIES
+# ============================================================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 OUTPUTS_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
+    BASE_DIR,
     "outputs"
 )
 
-os.makedirs(OUTPUTS_DIR, exist_ok=True)
+os.makedirs(
+    OUTPUTS_DIR,
+    exist_ok=True
+)
 
+
+# Serve generated images
 app.mount(
     "/outputs",
     StaticFiles(directory=OUTPUTS_DIR),
@@ -50,23 +80,75 @@ app.mount(
 )
 
 
-# Load user's trained YOLO11n weights
-print("Loading YOLO11n weights from best.pt...")
+# ============================================================
+# PUBLIC BACKEND URL
+# ============================================================
 
-model = YOLO("best.pt")
+# Render production URL.
+# Can also be overridden with BACKEND_PUBLIC_URL environment variable.
+BACKEND_PUBLIC_URL = os.getenv(
+    "BACKEND_PUBLIC_URL",
+    "https://deepscan-ai-tyvx.onrender.com"
+).rstrip("/")
 
-print(
-    f"YOLO11n model loaded successfully with classes: {model.names}"
+
+# ============================================================
+# MODEL PATH
+# ============================================================
+
+MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "best.pt"
 )
 
 
+# ============================================================
+# LOAD YOLO MODEL
+# ============================================================
+
+print("==============================================")
+print("          DEEPSCAN AI BACKEND")
+print("==============================================")
+
+print("Loading YOLO11n weights from:")
+print(MODEL_PATH)
+
+
+if not os.path.exists(MODEL_PATH):
+    raise FileNotFoundError(
+        f"YOLO model not found: {MODEL_PATH}"
+    )
+
+
+model = YOLO(MODEL_PATH)
+
+
+print(
+    "YOLO11n model loaded successfully with classes:"
+)
+print(model.names)
+
+print("==============================================")
+
+
+# ============================================================
+# STARTUP
+# ============================================================
+
 @app.on_event("startup")
 def startup():
+    print("Initializing database...")
     database.init_db()
+    print("Database initialized successfully.")
 
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
 
 @app.get("/health")
 def health_check():
+
     return {
         "status": "ONLINE",
         "model": "YOLO11n (best.pt)",
@@ -83,9 +165,37 @@ def health_check():
     }
 
 
-def process_image(image_bytes: bytes, filename: str) -> dict:
+# ============================================================
+# ROOT
+# ============================================================
+
+@app.get("/")
+def root():
+
+    return {
+        "message": "DeepScan AI Backend is running",
+        "status": "online",
+        "model": "YOLO11n (best.pt)",
+        "classes": model.names,
+        "number_of_classes": len(model.names),
+        "backend_url": BACKEND_PUBLIC_URL
+    }
+
+
+# ============================================================
+# IMAGE PROCESSING
+# ============================================================
+
+def process_image(
+    image_bytes: bytes,
+    filename: str
+) -> dict:
 
     scan_id = f"scan-{uuid.uuid4().hex[:8]}"
+
+    # --------------------------------------------------------
+    # OPEN IMAGE
+    # --------------------------------------------------------
 
     image = Image.open(
         io.BytesIO(image_bytes)
@@ -101,27 +211,67 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
     start_time = datetime.now()
 
 
-    # Run real YOLO11n inference on user's image
+    # ========================================================
+    # YOLO INFERENCE
+    # ========================================================
+
+    print(
+        f"Starting YOLO inference for {filename}"
+    )
+
+    print(
+        "Using memory-optimized inference: imgsz=320, max_det=20"
+    )
+
     results = model.predict(
-        image,
-        conf=0.15
+        source=image,
+
+        # LOWER IMAGE SIZE = LOWER RAM USAGE
+        imgsz=320,
+
+        # Same detection confidence threshold
+        conf=0.15,
+
+        # Prevent excessive detections/memory
+        max_det=20,
+
+        # Disable unnecessary logging
+        verbose=False,
+
+        # Explicit CPU inference for Render
+        device="cpu"
     )
 
     result = results[0]
 
 
     processing_time_ms = int(
-        (datetime.now() - start_time).total_seconds() * 1000
+        (
+            datetime.now() - start_time
+        ).total_seconds() * 1000
     )
 
 
-    # Generate annotated image
+    print(
+        f"YOLO inference completed in "
+        f"{processing_time_ms} ms"
+    )
+
+
+    # ========================================================
+    # GENERATE ANNOTATED IMAGE
+    # ========================================================
+
     annotated_plot = result.plot()
 
     annotated_pil = Image.fromarray(
         annotated_plot
     )
 
+
+    # ========================================================
+    # OUTPUT FILES
+    # ========================================================
 
     orig_path = os.path.join(
         OUTPUTS_DIR,
@@ -134,70 +284,108 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
     )
 
 
+    # Save original image
     image.save(
         orig_path,
         format="JPEG",
-        quality=92
+        quality=85,
+        optimize=True
     )
 
+
+    # Save annotated image
     annotated_pil.save(
         annotated_path,
         format="JPEG",
-        quality=92
+        quality=85,
+        optimize=True
     )
 
 
-    # Production Render URLs
+    # ========================================================
+    # PRODUCTION IMAGE URLS
+    # ========================================================
+
     image_url = (
-        f"https://deepscan-ai-tyvx.onrender.com/"
-        f"outputs/{scan_id}.jpg"
+        f"{BACKEND_PUBLIC_URL}"
+        f"/outputs/{scan_id}.jpg"
     )
 
     annotated_image_url = (
-        f"https://deepscan-ai-tyvx.onrender.com/"
-        f"outputs/{scan_id}_annotated.jpg"
+        f"{BACKEND_PUBLIC_URL}"
+        f"/outputs/{scan_id}_annotated.jpg"
     )
 
 
-    # Annotated image as Base64
+    # ========================================================
+    # BASE64 IMAGES
+    # ========================================================
+
+    # Annotated image
     buffer = io.BytesIO()
 
     annotated_pil.save(
         buffer,
         format="JPEG",
-        quality=90
+        quality=75,
+        optimize=True
     )
 
     annotated_base64 = (
         "data:image/jpeg;base64,"
-        f"{base64.b64encode(buffer.getvalue()).decode('utf-8')}"
+        + base64.b64encode(
+            buffer.getvalue()
+        ).decode("utf-8")
     )
 
 
-    # Original image as Base64
+    # Original image
     orig_buffer = io.BytesIO()
 
     image.save(
         orig_buffer,
         format="JPEG",
-        quality=85
+        quality=75,
+        optimize=True
     )
 
     orig_base64 = (
         "data:image/jpeg;base64,"
-        f"{base64.b64encode(orig_buffer.getvalue()).decode('utf-8')}"
+        + base64.b64encode(
+            orig_buffer.getvalue()
+        ).decode("utf-8")
     )
 
+
+    # ========================================================
+    # EXTRACT REAL YOLO DETECTIONS
+    # ========================================================
 
     detections = []
 
 
-    # Only return REAL detections from best.pt — NO FAKE DETECTIONS!
-    if result.boxes is not None and len(result.boxes) > 0:
+    if (
+        result.boxes is not None
+        and len(result.boxes) > 0
+    ):
 
-        boxes = result.boxes.xyxy.cpu().numpy()
-        confs = result.boxes.conf.cpu().numpy()
-        classes = result.boxes.cls.cpu().numpy()
+        boxes = (
+            result.boxes.xyxy
+            .cpu()
+            .numpy()
+        )
+
+        confs = (
+            result.boxes.conf
+            .cpu()
+            .numpy()
+        )
+
+        classes = (
+            result.boxes.cls
+            .cpu()
+            .numpy()
+        )
 
 
         for i in range(len(boxes)):
@@ -207,9 +395,13 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
                 for v in boxes[i]
             ]
 
-            conf = float(confs[i])
+            conf = float(
+                confs[i]
+            )
 
-            cls_idx = int(classes[i])
+            cls_idx = int(
+                classes[i]
+            )
 
             cls_name = model.names.get(
                 cls_idx,
@@ -217,22 +409,35 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
             )
 
 
+            # ------------------------------------------------
+            # INTELLIGENCE ENGINE
+            # ------------------------------------------------
+
             intel = get_intelligence(
                 cls_name,
                 conf,
-                [x1, y1, x2, y2]
+                [
+                    x1,
+                    y1,
+                    x2,
+                    y2
+                ]
             )
 
 
             detections.append({
 
-                "id": f"det-{uuid.uuid4().hex[:6]}",
+                "id":
+                    f"det-{uuid.uuid4().hex[:6]}",
 
-                "className": cls_name,
+                "className":
+                    cls_name,
 
-                "category": intel["category"],
+                "category":
+                    intel["category"],
 
-                "confidence": round(conf, 2),
+                "confidence":
+                    round(conf, 2),
 
                 "bbox": [
                     round(x1, 2),
@@ -241,46 +446,76 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
                     round(y2, 2)
                 ],
 
-                "pixelDimensions": intel["pixel_dimensions"],
+                "pixelDimensions":
+                    intel["pixel_dimensions"],
 
-                "priorityScore": intel["priority_score"],
+                "priorityScore":
+                    intel["priority_score"],
 
-                "priorityLevel": intel["priority_level"],
+                "priorityLevel":
+                    intel["priority_level"],
 
-                "ecoImpact": intel["eco_impact"],
+                "ecoImpact":
+                    intel["eco_impact"],
 
-                "actionRecommended": intel["action_recommended"],
+                "actionRecommended":
+                    intel["action_recommended"],
 
-                "verificationStatus": "unreviewed",
+                "verificationStatus":
+                    "unreviewed",
 
-                "timestamp": datetime.utcnow().isoformat()
-
+                "timestamp":
+                    datetime.utcnow().isoformat()
             })
 
 
-    # Run classical CV Sonar Quality Analyzer
-    # on input image
+    print(
+        f"Detections found: {len(detections)}"
+    )
+
+
+    # ========================================================
+    # SONAR QUALITY ANALYZER
+    # ========================================================
+
+    sonar_quality_payload = None
+
+    evidence_assessment_payload = None
+
+    sq = None
+    ea = None
+
 
     try:
 
-        quality_analysis = analyze_sonar_image_quality(
-            image_bytes,
-            detections=detections
+        quality_analysis = (
+            analyze_sonar_image_quality(
+                image_bytes,
+                detections=detections
+            )
         )
 
 
-        final_detections = quality_analysis.get(
-            "enriched_detections",
-            detections
+        final_detections = (
+            quality_analysis.get(
+                "enriched_detections",
+                detections
+            )
         )
 
-        sq = quality_analysis["sonar_quality"]
 
-        ea = quality_analysis["evidence_assessment"]
+        sq = quality_analysis[
+            "sonar_quality"
+        ]
+
+        ea = quality_analysis[
+            "evidence_assessment"
+        ]
 
 
-        # Format detection objects with camelCase fields
-        # for frontend compatibility
+        # ----------------------------------------------------
+        # FRONTEND COMPATIBILITY
+        # ----------------------------------------------------
 
         for det in final_detections:
 
@@ -289,25 +524,33 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
                 det["shadowMetrics"] = {
 
                     "shadowDetected":
-                        det["acoustic_shadow"].get(
+                        det[
+                            "acoustic_shadow"
+                        ].get(
                             "shadow_detected",
                             False
                         ),
 
                     "shadowContrastRatio":
-                        det["acoustic_shadow"].get(
+                        det[
+                            "acoustic_shadow"
+                        ].get(
                             "shadow_contrast_ratio",
                             1.0
                         ),
 
                     "evidenceStrength":
-                        det["acoustic_shadow"].get(
+                        det[
+                            "acoustic_shadow"
+                        ].get(
                             "evidence_strength",
                             "ABSENT"
                         ),
 
                     "description":
-                        det["acoustic_shadow"].get(
+                        det[
+                            "acoustic_shadow"
+                        ].get(
                             "description",
                             ""
                         )
@@ -335,108 +578,228 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
             )
 
 
+        # ----------------------------------------------------
+        # SONAR QUALITY RESPONSE
+        # ----------------------------------------------------
+
         sonar_quality_payload = {
 
             "speckleNoise": {
 
                 "speckleIndex":
-                    sq["speckle_noise"]["speckle_index"],
+                    sq[
+                        "speckle_noise"
+                    ][
+                        "speckle_index"
+                    ],
 
                 "speckleLevel":
-                    sq["speckle_noise"]["speckle_level"],
+                    sq[
+                        "speckle_noise"
+                    ][
+                        "speckle_level"
+                    ],
 
                 "enl":
-                    sq["speckle_noise"]["enl"],
+                    sq[
+                        "speckle_noise"
+                    ][
+                        "enl"
+                    ],
 
                 "score":
-                    sq["speckle_noise"]["score"],
+                    sq[
+                        "speckle_noise"
+                    ][
+                        "score"
+                    ],
 
                 "description":
-                    sq["speckle_noise"]["description"]
+                    sq[
+                        "speckle_noise"
+                    ][
+                        "description"
+                    ]
             },
 
 
             "resolutionQuality": {
 
                 "width":
-                    sq["resolution_quality"]["width"],
+                    sq[
+                        "resolution_quality"
+                    ][
+                        "width"
+                    ],
 
                 "height":
-                    sq["resolution_quality"]["height"],
+                    sq[
+                        "resolution_quality"
+                    ][
+                        "height"
+                    ],
 
                 "sharpnessScore":
-                    sq["resolution_quality"]["sharpness_score"],
+                    sq[
+                        "resolution_quality"
+                    ][
+                        "sharpness_score"
+                    ],
 
                 "laplacianVariance":
-                    sq["resolution_quality"]["laplacian_variance"],
+                    sq[
+                        "resolution_quality"
+                    ][
+                        "laplacian_variance"
+                    ],
 
                 "meanGradient":
-                    sq["resolution_quality"]["mean_gradient"],
+                    sq[
+                        "resolution_quality"
+                    ][
+                        "mean_gradient"
+                    ],
 
                 "contrastScore":
-                    sq["resolution_quality"]["contrast_score"],
+                    sq[
+                        "resolution_quality"
+                    ][
+                        "contrast_score"
+                    ],
 
                 "dynamicRange":
-                    sq["resolution_quality"]["dynamic_range"],
+                    sq[
+                        "resolution_quality"
+                    ][
+                        "dynamic_range"
+                    ],
 
                 "qualityRating":
-                    sq["resolution_quality"]["quality_rating"],
+                    sq[
+                        "resolution_quality"
+                    ][
+                        "quality_rating"
+                    ],
 
                 "compositeScore":
-                    sq["overall_quality"]["composite_score"],
+                    sq[
+                        "overall_quality"
+                    ][
+                        "composite_score"
+                    ],
 
                 "description":
-                    sq["overall_quality"]["description"],
+                    sq[
+                        "overall_quality"
+                    ][
+                        "description"
+                    ],
 
                 "disclaimer":
-                    sq["resolution_quality"]["disclaimer"]
+                    sq[
+                        "resolution_quality"
+                    ][
+                        "disclaimer"
+                    ]
             },
 
 
             "acousticShadow": {
 
                 "shadowDetected":
-                    sq["acoustic_shadow"]["shadow_detected"],
+                    sq[
+                        "acoustic_shadow"
+                    ][
+                        "shadow_detected"
+                    ],
 
                 "shadowContrastRatio":
-                    sq["acoustic_shadow"]["shadow_contrast_ratio"],
+                    sq[
+                        "acoustic_shadow"
+                    ][
+                        "shadow_contrast_ratio"
+                    ],
 
                 "evidenceStrength":
-                    sq["acoustic_shadow"]["evidence_strength"],
+                    sq[
+                        "acoustic_shadow"
+                    ][
+                        "evidence_strength"
+                    ],
 
                 "description":
-                    sq["acoustic_shadow"]["description"],
+                    sq[
+                        "acoustic_shadow"
+                    ][
+                        "description"
+                    ],
 
                 "methodology":
-                    sq["acoustic_shadow"]["methodology"]
+                    sq[
+                        "acoustic_shadow"
+                    ][
+                        "methodology"
+                    ]
             },
 
 
             "motionDropout": {
 
                 "dropoutDetected":
-                    sq["dropout_artifact"]["dropout_detected"],
+                    sq[
+                        "dropout_artifact"
+                    ][
+                        "dropout_detected"
+                    ],
 
                 "dropoutCount":
-                    sq["dropout_artifact"]["dropout_count"],
+                    sq[
+                        "dropout_artifact"
+                    ][
+                        "dropout_count"
+                    ],
 
                 "dropoutPercentage":
-                    sq["dropout_artifact"]["dropout_percentage"],
+                    sq[
+                        "dropout_artifact"
+                    ][
+                        "dropout_percentage"
+                    ],
 
                 "artifactSeverity":
-                    sq["dropout_artifact"]["artifact_severity"],
+                    sq[
+                        "dropout_artifact"
+                    ][
+                        "artifact_severity"
+                    ],
 
                 "rowJitterMean":
-                    sq["dropout_artifact"]["row_jitter_mean"],
+                    sq[
+                        "dropout_artifact"
+                    ][
+                        "row_jitter_mean"
+                    ],
 
                 "detectedArtifacts":
-                    sq["dropout_artifact"]["detected_artifacts"],
+                    sq[
+                        "dropout_artifact"
+                    ][
+                        "detected_artifacts"
+                    ],
 
                 "description":
-                    sq["dropout_artifact"]["description"],
+                    sq[
+                        "dropout_artifact"
+                    ][
+                        "description"
+                    ],
 
                 "disclaimer":
-                    sq["dropout_artifact"]["disclaimer"]
+                    sq[
+                        "dropout_artifact"
+                    ][
+                        "disclaimer"
+                    ]
             }
         }
 
@@ -444,26 +807,37 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
         evidence_assessment_payload = {
 
             "evidenceScore":
-                ea["evidence_score"],
+                ea[
+                    "evidence_score"
+                ],
 
             "reliability":
-                ea["reliability"],
+                ea[
+                    "reliability"
+                ],
 
             "reviewRequired":
-                ea["review_required"],
+                ea[
+                    "review_required"
+                ],
 
             "reviewReasons":
-                ea["review_reasons"],
+                ea[
+                    "review_reasons"
+                ],
 
             "components":
-                ea["components"]
+                ea[
+                    "components"
+                ]
         }
 
 
     except Exception as q_err:
 
         print(
-            f"Warning: Sonar quality analysis failed: {q_err}"
+            "Warning: Sonar quality analysis failed:",
+            q_err
         )
 
         final_detections = detections
@@ -473,36 +847,53 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
         evidence_assessment_payload = None
 
         sq = None
-
         ea = None
 
 
+    # ========================================================
+    # SCAN DATA
+    # ========================================================
+
     scan_data = {
 
-        "id": scan_id,
+        "id":
+            scan_id,
 
-        "filename": filename,
+        "filename":
+            filename,
 
-        "fileSizeMB": file_size_mb or 0.01,
+        "fileSizeMB":
+            file_size_mb or 0.01,
 
         "resolution": {
-            "width": width,
-            "height": height
+
+            "width":
+                width,
+
+            "height":
+                height
         },
 
-        "imageUrl": image_url,
+        "imageUrl":
+            image_url,
 
-        "annotatedImageUrl": annotated_image_url,
+        "annotatedImageUrl":
+            annotated_image_url,
 
-        "imageBase64": orig_base64,
+        "imageBase64":
+            orig_base64,
 
-        "annotatedBase64": annotated_base64,
+        "annotatedBase64":
+            annotated_base64,
 
-        "detections": final_detections,
+        "detections":
+            final_detections,
 
-        "sonarQuality": sonar_quality_payload,
+        "sonarQuality":
+            sonar_quality_payload,
 
-        "sonar_quality": sq,
+        "sonar_quality":
+            sq,
 
         "evidenceAssessment":
             evidence_assessment_payload,
@@ -516,7 +907,10 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
             ),
 
         "processingTimeMs":
-            max(10, processing_time_ms),
+            max(
+                10,
+                processing_time_ms
+            ),
 
         "modelVersion":
             "YOLO11n (best.pt)",
@@ -526,12 +920,15 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
     }
 
 
+    # ========================================================
+    # SAVE TO DATABASE
+    # ========================================================
+
     try:
 
         database.save_scan(
 
             {
-
                 "id":
                     scan_id,
 
@@ -541,11 +938,13 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
                 "file_size_mb":
                     file_size_mb,
 
-                "resolution":
-                    {
-                        "width": width,
-                        "height": height
-                    },
+                "resolution": {
+                    "width":
+                        width,
+
+                    "height":
+                        height
+                },
 
                 "image_url":
                     image_url,
@@ -554,13 +953,19 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
                     annotated_image_url,
 
                 "processed_at":
-                    scan_data["processedAt"],
+                    scan_data[
+                        "processedAt"
+                    ],
 
                 "processing_time_ms":
-                    scan_data["processingTimeMs"],
+                    scan_data[
+                        "processingTimeMs"
+                    ],
 
                 "model_version":
-                    scan_data["modelVersion"],
+                    scan_data[
+                        "modelVersion"
+                    ],
 
                 "sonarQuality":
                     scan_data.get(
@@ -580,12 +985,40 @@ def process_image(image_bytes: bytes, filename: str) -> dict:
     except Exception as e:
 
         print(
-            f"Error saving to db: {e}"
+            "Error saving to database:",
+            e
         )
+
+
+    # ========================================================
+    # MEMORY CLEANUP
+    # ========================================================
+
+    try:
+
+        del results
+        del result
+        del annotated_plot
+        del annotated_pil
+
+    except Exception:
+        pass
+
+
+    gc.collect()
+
+
+    print(
+        f"Scan completed successfully: {scan_id}"
+    )
 
 
     return scan_data
 
+
+# ============================================================
+# SINGLE IMAGE PREDICTION
+# ============================================================
 
 @app.post("/predict")
 async def predict_single(
@@ -600,13 +1033,20 @@ async def predict_single(
     )
 
 
+# ============================================================
+# BATCH PREDICTION
+# ============================================================
+
 @app.post("/predict-batch")
 async def predict_batch(
     files: list[UploadFile] = File(...)
 ):
 
     """
-    Batch inference for multiple sonar frames
+    Batch inference for multiple sonar frames.
+
+    Images are processed one-by-one instead of simultaneously
+    to keep RAM usage low.
     """
 
     scans = []
@@ -622,17 +1062,20 @@ async def predict_batch(
 
         scans.append(scan)
 
+        gc.collect()
+
+
     return scans
 
+
+# ============================================================
+# GET SCAN HISTORY
+# ============================================================
 
 @app.get("/scans")
 def get_scans(
     limit: int = 200
 ):
-
-    """
-    Retrieve real persistent scan history from SQLite database
-    """
 
     return {
         "scans":
@@ -642,42 +1085,51 @@ def get_scans(
     }
 
 
+# ============================================================
+# DELETE SINGLE SCAN
+# ============================================================
+
 @app.delete("/scans/{scan_id}")
 def delete_single_scan(
     scan_id: str
 ):
-
-    """
-    Delete an individual scan record from SQLite database
-    """
 
     database.delete_scan(
         scan_id
     )
 
     return {
-        "status": "SUCCESS",
+
+        "status":
+            "SUCCESS",
+
         "message":
             f"Scan {scan_id} deleted successfully."
     }
 
 
+# ============================================================
+# CLEAR ALL HISTORY
+# ============================================================
+
 @app.delete("/scans")
 def clear_all_history():
-
-    """
-    Clear all scan history and audit trail records
-    from SQLite database
-    """
 
     database.clear_all_scans()
 
     return {
-        "status": "SUCCESS",
+
+        "status":
+            "SUCCESS",
+
         "message":
             "All scan history cleared successfully."
     }
 
+
+# ============================================================
+# HUMAN-IN-THE-LOOP FEEDBACK
+# ============================================================
 
 @app.post("/feedback")
 async def record_feedback(
@@ -744,6 +1196,10 @@ async def record_feedback(
             feedback_id
     }
 
+
+# ============================================================
+# LOCAL DEVELOPMENT
+# ============================================================
 
 if __name__ == "__main__":
 
