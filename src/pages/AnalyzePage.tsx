@@ -14,37 +14,24 @@ export const AnalyzePage: React.FC = () => {
   const [activeResultsScan, setActiveResultsScan] = useState<SonarScan | null>(null);
   const [batchScans, setBatchScans] = useState<SonarScan[]>([]);
   const [currentBatchIndex, setCurrentBatchIndex] = useState<number>(0);
-
   const [isScanning, setIsScanning] = useState(false);
-  const [backendOnline, setBackendOnline] = useState(false);
 
-  // Check Render FastAPI backend
+  // Initial backend health check
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        const response = await fetch(`${BACKEND_URL}/health`, {
-          method: 'GET',
-        });
+        const response = await fetch(`${BACKEND_URL}/health`);
 
         if (!response.ok) {
-          setBackendOnline(false);
+          console.warn('Backend health check returned:', response.status);
           return;
         }
 
         const data = await response.json();
 
-        if (
-          data.status === 'ONLINE' ||
-          data.status === 'healthy' ||
-          data.status === 'online'
-        ) {
-          setBackendOnline(true);
-        } else {
-          setBackendOnline(false);
-        }
+        console.log('DeepScan AI backend status:', data.status);
       } catch (error) {
         console.warn('Backend health check failed:', error);
-        setBackendOnline(false);
       }
     };
 
@@ -57,7 +44,6 @@ export const AnalyzePage: React.FC = () => {
     setBatchScans([]);
     setCurrentBatchIndex(0);
 
-    // Preview single image
     if (files.length === 1) {
       const file = files[0];
       const reader = new FileReader();
@@ -111,15 +97,16 @@ export const AnalyzePage: React.FC = () => {
     setCurrentBatchIndex(0);
   };
 
-  // Wake/check backend before inference
+  // Check/wake Render backend before inference
   const checkBackendBeforeInference = async (): Promise<boolean> => {
     try {
-      const response = await fetch(`${BACKEND_URL}/health`, {
-        method: 'GET',
-      });
+      const response = await fetch(`${BACKEND_URL}/health`);
 
       if (!response.ok) {
-        setBackendOnline(false);
+        console.warn(
+          'Backend health check failed with status:',
+          response.status
+        );
         return false;
       }
 
@@ -130,12 +117,11 @@ export const AnalyzePage: React.FC = () => {
         data.status === 'healthy' ||
         data.status === 'online';
 
-      setBackendOnline(online);
+      console.log('Backend ready:', online);
 
       return online;
     } catch (error) {
-      console.warn('Unable to reach Render backend:', error);
-      setBackendOnline(false);
+      console.error('Unable to reach Render backend:', error);
       return false;
     }
   };
@@ -149,7 +135,7 @@ export const AnalyzePage: React.FC = () => {
     setIsScanning(true);
 
     try {
-      // Check/wake Render backend
+      // Check backend before inference
       const isBackendReady = await checkBackendBeforeInference();
 
       if (!isBackendReady) {
@@ -162,9 +148,9 @@ export const AnalyzePage: React.FC = () => {
         return;
       }
 
-      // ---------------------------------------------------------
-      // 1. SINGLE IMAGE DETECTION
-      // ---------------------------------------------------------
+      // =========================================================
+      // SINGLE IMAGE DETECTION
+      // =========================================================
       if (uploadedFiles.length === 1) {
         const formData = new FormData();
 
@@ -206,9 +192,9 @@ export const AnalyzePage: React.FC = () => {
         return;
       }
 
-      // ---------------------------------------------------------
-      // 2. BATCH IMAGE DETECTION
-      // ---------------------------------------------------------
+      // =========================================================
+      // BATCH IMAGE DETECTION
+      // =========================================================
       if (uploadedFiles.length > 1) {
         const formData = new FormData();
 
@@ -259,7 +245,10 @@ export const AnalyzePage: React.FC = () => {
         return;
       }
     } catch (error) {
-      console.error('DeepScan AI inference error:', error);
+      console.error(
+        'DeepScan AI inference error:',
+        error
+      );
 
       setIsScanning(false);
 
@@ -330,7 +319,6 @@ export const AnalyzePage: React.FC = () => {
     <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 py-6">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
 
-        {/* Scan Input */}
         <div className="lg:col-span-5 h-full">
           <ScanInputPanel
             uploadedFiles={uploadedFiles}
@@ -343,7 +331,6 @@ export const AnalyzePage: React.FC = () => {
           />
         </div>
 
-        {/* AI Results */}
         <div className="lg:col-span-7 h-full">
           <IntelligenceCard
             scan={activeResultsScan}
@@ -358,6 +345,7 @@ export const AnalyzePage: React.FC = () => {
             }
           />
         </div>
+
       </div>
 
       <FeatureHighlights />
