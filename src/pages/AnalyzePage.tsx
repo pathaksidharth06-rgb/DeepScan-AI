@@ -23,15 +23,24 @@ export const AnalyzePage: React.FC = () => {
         const response = await fetch(`${BACKEND_URL}/health`);
 
         if (!response.ok) {
-          console.warn('Backend health check returned:', response.status);
+          console.warn(
+            'Backend health check returned:',
+            response.status
+          );
           return;
         }
 
         const data = await response.json();
 
-        console.log('DeepScan AI backend status:', data.status);
+        console.log(
+          'DeepScan AI backend status:',
+          data.status
+        );
       } catch (error) {
-        console.warn('Backend health check failed:', error);
+        console.warn(
+          'Backend health check failed:',
+          error
+        );
       }
     };
 
@@ -49,22 +58,27 @@ export const AnalyzePage: React.FC = () => {
       const reader = new FileReader();
 
       reader.onload = (e) => {
-        const previewUrl = e.target?.result as string;
+        const previewUrl =
+          e.target?.result as string;
 
         setSelectedScan({
           id: `preview-${Date.now()}`,
           filename: file.name,
           fileSizeMB:
-            Math.round((file.size / (1024 * 1024)) * 100) / 100 || 0.01,
+            Math.round(
+              (file.size / (1024 * 1024)) * 100
+            ) / 100 || 0.01,
           resolution: {
             width: 1024,
             height: 800,
           },
           imageUrl: previewUrl,
           detections: [],
-          processedAt: new Date().toISOString(),
+          processedAt:
+            new Date().toISOString(),
           processingTimeMs: 0,
-          modelVersion: 'YOLO11n (best.pt)',
+          modelVersion:
+            'YOLO11n (best.pt)',
         });
       };
 
@@ -75,7 +89,10 @@ export const AnalyzePage: React.FC = () => {
   };
 
   const handleRemoveFile = (index: number) => {
-    const updated = uploadedFiles.filter((_, i) => i !== index);
+    const updated =
+      uploadedFiles.filter(
+        (_, i) => i !== index
+      );
 
     setUploadedFiles(updated);
 
@@ -98,37 +115,49 @@ export const AnalyzePage: React.FC = () => {
   };
 
   // Check/wake Render backend before inference
-  const checkBackendBeforeInference = async (): Promise<boolean> => {
-    try {
-      const response = await fetch(`${BACKEND_URL}/health`);
+  const checkBackendBeforeInference =
+    async (): Promise<boolean> => {
+      try {
+        const response = await fetch(
+          `${BACKEND_URL}/health`
+        );
 
-      if (!response.ok) {
-        console.warn(
-          'Backend health check failed with status:',
-          response.status
+        if (!response.ok) {
+          console.warn(
+            'Backend health check failed with status:',
+            response.status
+          );
+          return false;
+        }
+
+        const data =
+          await response.json();
+
+        const online =
+          data.status === 'ONLINE' ||
+          data.status === 'healthy' ||
+          data.status === 'online';
+
+        console.log(
+          'Backend ready:',
+          online
+        );
+
+        return online;
+      } catch (error) {
+        console.error(
+          'Unable to reach Render backend:',
+          error
         );
         return false;
       }
-
-      const data = await response.json();
-
-      const online =
-        data.status === 'ONLINE' ||
-        data.status === 'healthy' ||
-        data.status === 'online';
-
-      console.log('Backend ready:', online);
-
-      return online;
-    } catch (error) {
-      console.error('Unable to reach Render backend:', error);
-      return false;
-    }
-  };
+    };
 
   const handleDetect = async () => {
     if (uploadedFiles.length === 0) {
-      alert('Please upload at least one sonar image first.');
+      alert(
+        'Please upload at least one sonar image first.'
+      );
       return;
     }
 
@@ -136,7 +165,8 @@ export const AnalyzePage: React.FC = () => {
 
     try {
       // Check backend before inference
-      const isBackendReady = await checkBackendBeforeInference();
+      const isBackendReady =
+        await checkBackendBeforeInference();
 
       if (!isBackendReady) {
         setIsScanning(false);
@@ -154,17 +184,26 @@ export const AnalyzePage: React.FC = () => {
       if (uploadedFiles.length === 1) {
         const formData = new FormData();
 
-        formData.append('file', uploadedFiles[0]);
+        formData.append(
+          'file',
+          uploadedFiles[0]
+        );
 
-        console.log('Sending image to DeepScan AI backend...');
+        console.log(
+          'Sending image to DeepScan AI backend...'
+        );
 
-        const response = await fetch(`${BACKEND_URL}/predict`, {
-          method: 'POST',
-          body: formData,
-        });
+        const response = await fetch(
+          `${BACKEND_URL}/predict`,
+          {
+            method: 'POST',
+            body: formData,
+          }
+        );
 
         if (!response.ok) {
-          const errorText = await response.text();
+          const errorText =
+            await response.text();
 
           console.error(
             'Prediction failed:',
@@ -177,15 +216,27 @@ export const AnalyzePage: React.FC = () => {
           );
         }
 
-        const liveData: SonarScan = await response.json();
+        const liveData: SonarScan =
+          await response.json();
 
-        console.log('Prediction successful:', liveData);
+        console.log(
+          'Prediction successful:',
+          liveData
+        );
 
-        setActiveResultsScan(liveData);
-        setBatchScans([liveData]);
+        setActiveResultsScan(
+          liveData
+        );
+
+        setBatchScans([
+          liveData,
+        ]);
+
         setCurrentBatchIndex(0);
 
-        storageService.saveScan(liveData);
+        storageService.saveScan(
+          liveData
+        );
 
         setIsScanning(false);
 
@@ -196,23 +247,34 @@ export const AnalyzePage: React.FC = () => {
       // BATCH IMAGE DETECTION
       // =========================================================
       if (uploadedFiles.length > 1) {
-        const formData = new FormData();
+        const formData =
+          new FormData();
 
-        uploadedFiles.forEach((file) => {
-          formData.append('files', file);
-        });
+        uploadedFiles.forEach(
+          (file) => {
+            formData.append(
+              'files',
+              file
+            );
+          }
+        );
 
         console.log(
           `Sending ${uploadedFiles.length} images for batch detection...`
         );
 
-        const response = await fetch(`${BACKEND_URL}/predict-batch`, {
-          method: 'POST',
-          body: formData,
-        });
+        const response =
+          await fetch(
+            `${BACKEND_URL}/predict-batch`,
+            {
+              method: 'POST',
+              body: formData,
+            }
+          );
 
         if (!response.ok) {
-          const errorText = await response.text();
+          const errorText =
+            await response.text();
 
           console.error(
             'Batch prediction failed:',
@@ -225,20 +287,84 @@ export const AnalyzePage: React.FC = () => {
           );
         }
 
-        const liveBatch: SonarScan[] = await response.json();
+        const data =
+          await response.json();
+
+        /*
+         * Backend returns:
+         *
+         * {
+         *   success: true,
+         *   count: 5,
+         *   results: [...]
+         * }
+         *
+         * Older code treated the complete object
+         * as SonarScan[], which caused:
+         *
+         * "r.forEach is not a function"
+         *
+         * Accept both the current object format and
+         * a direct array for compatibility.
+         */
+        const rawBatch =
+          Array.isArray(data)
+            ? data
+            : Array.isArray(data?.results)
+              ? data.results
+              : [];
+
+        const successfulBatch =
+          rawBatch.filter(
+            (scan: any) =>
+              scan &&
+              scan.success !== false &&
+              scan.id
+          ) as SonarScan[];
+
+        const failedBatch =
+          rawBatch.filter(
+            (scan: any) =>
+              scan &&
+              scan.success === false
+          );
 
         console.log(
           'Batch prediction successful:',
-          liveBatch
+          successfulBatch
         );
 
-        setBatchScans(liveBatch);
-        setCurrentBatchIndex(0);
-        setActiveResultsScan(liveBatch[0] || null);
+        if (failedBatch.length > 0) {
+          console.warn(
+            'Some batch images failed:',
+            failedBatch
+          );
+        }
 
-        liveBatch.forEach((scan) => {
-          storageService.saveScan(scan);
-        });
+        if (successfulBatch.length === 0) {
+          throw new Error(
+            'The backend returned no successful batch results.'
+          );
+        }
+
+        setBatchScans(
+          successfulBatch
+        );
+
+        setCurrentBatchIndex(0);
+
+        setActiveResultsScan(
+          successfulBatch[0]
+        );
+
+        // Save every successful batch scan
+        successfulBatch.forEach(
+          (scan) => {
+            storageService.saveScan(
+              scan
+            );
+          }
+        );
 
         setIsScanning(false);
 
@@ -263,15 +389,21 @@ export const AnalyzePage: React.FC = () => {
     }
   };
 
-  const handleSelectBatchIndex = (idx: number) => {
+  const handleSelectBatchIndex = (
+    idx: number
+  ) => {
     setCurrentBatchIndex(idx);
 
     if (batchScans[idx]) {
-      setActiveResultsScan(batchScans[idx]);
+      setActiveResultsScan(
+        batchScans[idx]
+      );
     }
   };
 
-  const handleVerify = (detectionId: string) => {
+  const handleVerify = (
+    detectionId: string
+  ) => {
     if (!activeResultsScan) return;
 
     storageService.updateDetectionReview(
@@ -280,20 +412,29 @@ export const AnalyzePage: React.FC = () => {
       'verified'
     );
 
-    const updated = { ...activeResultsScan };
+    const updated = {
+      ...activeResultsScan,
+    };
 
-    const det = updated.detections.find(
-      (d) => d.id === detectionId
-    );
+    const det =
+      updated.detections.find(
+        (d) =>
+          d.id === detectionId
+      );
 
     if (det) {
-      det.verificationStatus = 'verified';
+      det.verificationStatus =
+        'verified';
     }
 
-    setActiveResultsScan(updated);
+    setActiveResultsScan(
+      updated
+    );
   };
 
-  const handleReject = (detectionId: string) => {
+  const handleReject = (
+    detectionId: string
+  ) => {
     if (!activeResultsScan) return;
 
     storageService.updateDetectionReview(
@@ -302,17 +443,24 @@ export const AnalyzePage: React.FC = () => {
       'rejected'
     );
 
-    const updated = { ...activeResultsScan };
+    const updated = {
+      ...activeResultsScan,
+    };
 
-    const det = updated.detections.find(
-      (d) => d.id === detectionId
-    );
+    const det =
+      updated.detections.find(
+        (d) =>
+          d.id === detectionId
+      );
 
     if (det) {
-      det.verificationStatus = 'rejected';
+      det.verificationStatus =
+        'rejected';
     }
 
-    setActiveResultsScan(updated);
+    setActiveResultsScan(
+      updated
+    );
   };
 
   return (
@@ -321,27 +469,59 @@ export const AnalyzePage: React.FC = () => {
 
         <div className="lg:col-span-5 h-full">
           <ScanInputPanel
-            uploadedFiles={uploadedFiles}
-            selectedScan={selectedScan}
-            onFilesSelected={handleFilesSelected}
-            onRemoveFile={handleRemoveFile}
-            onClear={handleClear}
-            onDetect={handleDetect}
-            isScanning={isScanning}
+            uploadedFiles={
+              uploadedFiles
+            }
+            selectedScan={
+              selectedScan
+            }
+            onFilesSelected={
+              handleFilesSelected
+            }
+            onRemoveFile={
+              handleRemoveFile
+            }
+            onClear={
+              handleClear
+            }
+            onDetect={
+              handleDetect
+            }
+            isScanning={
+              isScanning
+            }
           />
         </div>
 
         <div className="lg:col-span-7 h-full">
           <IntelligenceCard
-            scan={activeResultsScan}
-            batchScans={batchScans}
-            currentBatchIndex={currentBatchIndex}
-            onSelectBatchIndex={handleSelectBatchIndex}
-            isScanning={isScanning}
-            onVerify={handleVerify}
-            onReject={handleReject}
-            onDownloadReport={(scan) =>
-              generateSurveyPdfReport(scan)
+            scan={
+              activeResultsScan
+            }
+            batchScans={
+              batchScans
+            }
+            currentBatchIndex={
+              currentBatchIndex
+            }
+            onSelectBatchIndex={
+              handleSelectBatchIndex
+            }
+            isScanning={
+              isScanning
+            }
+            onVerify={
+              handleVerify
+            }
+            onReject={
+              handleReject
+            }
+            onDownloadReport={(
+              scan
+            ) =>
+              generateSurveyPdfReport(
+                scan
+              )
             }
           />
         </div>
