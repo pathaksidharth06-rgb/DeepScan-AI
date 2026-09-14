@@ -12,9 +12,16 @@ export type SonarClass =
   | 'Boulder'
   | 'Unknown Anomaly';
 
-export type ObjectCategory = 'Marine Debris / Anthropogenic' | 'Natural Object' | 'Unknown Anomaly';
+export type ObjectCategory =
+  | 'Marine Debris / Anthropogenic'
+  | 'Natural Object'
+  | 'Unknown Anomaly';
 
-export type PriorityLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type PriorityLevel =
+  | 'LOW'
+  | 'MEDIUM'
+  | 'HIGH'
+  | 'CRITICAL';
 
 export interface BoundingBox {
   x1: number;
@@ -23,11 +30,32 @@ export interface BoundingBox {
   y2: number;
 }
 
-export type SpeckleLevel = 'LOW' | 'MODERATE' | 'SEVERE';
-export type QualityRating = 'OPTIMAL' | 'ACCEPTABLE' | 'POOR';
-export type ShadowEvidenceStrength = 'STRONG' | 'MODERATE' | 'WEAK' | 'ABSENT';
-export type ArtifactSeverity = 'NONE' | 'LOW' | 'MODERATE' | 'SEVERE';
-export type ReliabilityLevel = 'HIGH' | 'MEDIUM' | 'REVIEW';
+export type SpeckleLevel =
+  | 'LOW'
+  | 'MODERATE'
+  | 'SEVERE';
+
+export type QualityRating =
+  | 'OPTIMAL'
+  | 'ACCEPTABLE'
+  | 'POOR';
+
+export type ShadowEvidenceStrength =
+  | 'STRONG'
+  | 'MODERATE'
+  | 'WEAK'
+  | 'ABSENT';
+
+export type ArtifactSeverity =
+  | 'NONE'
+  | 'LOW'
+  | 'MODERATE'
+  | 'SEVERE';
+
+export type ReliabilityLevel =
+  | 'HIGH'
+  | 'MEDIUM'
+  | 'REVIEW';
 
 export interface SpeckleNoiseMetrics {
   speckleIndex: number;
@@ -71,10 +99,11 @@ export interface AcousticShadowMetrics {
 }
 
 export interface AIEvidenceAssessment {
-  evidenceScore: number; // 0-100
+  evidenceScore: number;
   reliability: ReliabilityLevel;
   reviewRequired: boolean;
   reviewReasons: string[];
+
   components?: {
     yolo_confidence_contribution?: number;
     shadow_evidence_contribution?: number;
@@ -95,20 +124,29 @@ export interface SonarDetection {
   id: string;
   className: SonarClass;
   category: ObjectCategory;
-  confidence: number; // 0.0 to 1.0
-  bbox: [number, number, number, number]; // [x1, y1, x2, y2]
+  confidence: number;
+
+  bbox: [number, number, number, number];
+
   pixelDimensions: {
     width: number;
     height: number;
   };
-  priorityScore: number; // 0-100
+
+  priorityScore: number;
   priorityLevel: PriorityLevel;
   ecoImpact: string;
   actionRecommended: string;
-  verificationStatus: 'unreviewed' | 'verified' | 'rejected';
+
+  verificationStatus:
+    | 'unreviewed'
+    | 'verified'
+    | 'rejected';
+
   correctedLabel?: SonarClass;
   notes?: string;
   timestamp: string;
+
   shadowMetrics?: AcousticShadowMetrics;
   evidenceScore?: number;
   reliability?: ReliabilityLevel;
@@ -120,17 +158,27 @@ export interface SonarScan {
   id: string;
   filename: string;
   fileSizeMB: number;
+
   resolution: {
     width: number;
     height: number;
   };
+
   imageUrl: string;
   annotatedImageUrl?: string;
+
+  // Base64 image data for persistence and PDF generation
+  imageBase64?: string;
+  annotatedBase64?: string;
+
   detections: SonarDetection[];
+
   processedAt: string;
   processingTimeMs: number;
   modelVersion: string;
+
   isSample?: boolean;
+
   sonarQuality?: SonarQualityAnalysis;
   evidenceAssessment?: AIEvidenceAssessment;
 }
@@ -143,12 +191,16 @@ export interface MissionBatch {
   totalDetections: number;
   highPriorityCount: number;
   scans: SonarScan[];
-  status: 'completed' | 'processing' | 'idle';
+
+  status:
+    | 'completed'
+    | 'processing'
+    | 'idle';
 }
 
 export interface IntelligenceRule {
   category: ObjectCategory;
-  baseEcoWeight: number; // 0 - 50
+  baseEcoWeight: number;
   ecoImpact: string;
   actionRecommended: string;
   defaultPriorityLevel: PriorityLevel;
