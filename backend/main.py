@@ -1181,45 +1181,35 @@ def process_image(
     # SAVE OUTPUT
     # ========================================================
 
-    unique_id = uuid.uuid4().hex[:10]
+    scan_id = uuid.uuid4().hex
 
-    safe_name = Path(
-        filename
-    ).stem
+    original_output_filename = f"{scan_id}.jpg"
+    annotated_output_filename = f"{scan_id}_annotated.jpg"
 
-    output_filename = (
-        f"{safe_name}_"
-        f"{unique_id}_"
-        f"annotated.jpg"
-    )
+    original_output_path = OUTPUT_DIR / original_output_filename
+    annotated_output_path = OUTPUT_DIR / annotated_output_filename
 
-    output_path = (
-        OUTPUT_DIR /
-        output_filename
+    cv2.imwrite(
+        str(original_output_path),
+        original_image,
+        [int(cv2.IMWRITE_JPEG_QUALITY), 85],
     )
 
     cv2.imwrite(
-        str(output_path),
+        str(annotated_output_path),
         annotated_image,
-        [
-            int(
-                cv2.IMWRITE_JPEG_QUALITY
-            ),
-            85,
-        ],
+        [int(cv2.IMWRITE_JPEG_QUALITY), 85],
     )
 
     # ========================================================
     # PUBLIC URL
     # ========================================================
 
-    image_url = (
-        f"{BACKEND_PUBLIC_URL}"
-        f"/outputs/"
-        f"{output_filename}"
-    )
+    image_url = f"{BACKEND_PUBLIC_URL}/outputs/{original_output_filename}"
 
-    annotated_url = image_url
+    annotated_url = (
+        f"{BACKEND_PUBLIC_URL}/outputs/{annotated_output_filename}"
+    )
 
     # ========================================================
     # BASE64
@@ -1238,54 +1228,108 @@ def process_image(
     )
 
     # ========================================================
-    # SONAR QUALITY
+    # SONAR QUALITY + EVIDENCE ASSESSMENT
     # ========================================================
 
-    sonar_quality = None
+    sonar_quality = {
+        "speckleNoise": {},
+        "resolutionQuality": {},
+        "acousticShadow": {},
+        "motionDropout": {},
+        "overallQuality": {},
+    }
+
+    evidence_assessment = {
+        "evidenceScore": 0,
+        "reliability": "UNKNOWN",
+        "reviewRequired": False,
+        "reviewReasons": [],
+        "components": {},
+    }
 
     try:
-
-        sonar_quality = (
-            analyze_sonar_image_quality(
-                image_bytes,
-                detections=detections,
-            )
+        quality_result = analyze_sonar_image_quality(
+            image_bytes,
+            detections=detections,
         )
+
+        if isinstance(quality_result, dict):
+            raw_sq = quality_result.get(
+                "sonar_quality",
+                quality_result.get("sonarQuality", {}),
+            ) or {}
+
+            raw_ea = quality_result.get(
+                "evidence_assessment",
+                quality_result.get("evidenceAssessment", {}),
+            ) or {}
+
+            sonar_quality = {
+                "speckleNoise": raw_sq.get(
+                    "speckle_noise",
+                    raw_sq.get("speckleNoise", {}),
+                ) or {},
+                "resolutionQuality": raw_sq.get(
+                    "resolution_quality",
+                    raw_sq.get("resolutionQuality", {}),
+                ) or {},
+                "acousticShadow": raw_sq.get(
+                    "acoustic_shadow",
+                    raw_sq.get("acousticShadow", {}),
+                ) or {},
+                "motionDropout": raw_sq.get(
+                    "dropout_artifact",
+                    raw_sq.get("motionDropout", {}),
+                ) or {},
+                "overallQuality": raw_sq.get(
+                    "overall_quality",
+                    raw_sq.get("overallQuality", {}),
+                ) or {},
+            }
+
+            evidence_assessment = {
+                "evidenceScore": raw_ea.get(
+                    "evidence_score",
+                    raw_ea.get("evidenceScore", 0),
+                ),
+                "reliability": raw_ea.get("reliability", "UNKNOWN"),
+                "reviewRequired": raw_ea.get(
+                    "review_required",
+                    raw_ea.get("reviewRequired", False),
+                ),
+                "reviewReasons": raw_ea.get(
+                    "review_reasons",
+                    raw_ea.get("reviewReasons", []),
+                ) or [],
+                "components": raw_ea.get("components", {}) or {},
+            }
+
+            raw_enriched = quality_result.get(
+                "enriched_detections", []
+            ) or []
+
+            if isinstance(raw_enriched, list) and len(raw_enriched) == len(detections):
+                for i, item in enumerate(raw_enriched):
+                    if not isinstance(item, dict):
+                        continue
+
+                    pairs = {
+                        "acoustic_shadow": "acousticShadow",
+                        "evidence_score": "evidenceScore",
+                        "review_required": "reviewRequired",
+                        "review_reasons": "reviewReasons",
+                    }
+
+                    for old_key, new_key in pairs.items():
+                        if old_key in item:
+                            detections[i][old_key] = item[old_key]
+                            detections[i][new_key] = item[old_key]
+
+                    if "reliability" in item:
+                        detections[i]["reliability"] = item["reliability"]
 
     except Exception as e:
-
-        print(
-            "Sonar quality warning:",
-            repr(e)
-        )
-
-    # ========================================================
-    # EVIDENCE ASSESSMENT
-    # ========================================================
-
-    if detections:
-
-        evidence_assessment = {
-
-            "status": "Detected",
-
-            "message": (
-                f"{len(detections)} "
-                "object(s) detected by AI."
-            ),
-        }
-
-    else:
-
-        evidence_assessment = {
-
-            "status": "No Detection",
-
-            "message": (
-                "No target objects detected "
-                "above the confidence threshold."
-            ),
-        }
+        print("Sonar quality warning:", repr(e))
 
     # ========================================================
     # PROCESSING TIME
@@ -1306,6 +1350,8 @@ def process_image(
     result = {
 
         "success": True,
+
+        "id": scan_id,
 
         "filename": filename,
 
@@ -1417,7 +1463,8 @@ async def predict(
         try:
 
             database.save_scan(
-                result
+                result,
+                result.get("detections", []),
             )
 
         except Exception as e:
@@ -1567,7 +1614,7 @@ def delete_all_scans():
 
 @app.delete("/scans/{scan_id}")
 def delete_single_scan(
-    scan_id: int
+    scan_id: str
 ):
 
     try:
