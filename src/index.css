@@ -111,20 +111,29 @@
     overflow-x: hidden;
   }
 
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  /* Prevent mobile text from breaking letter-by-letter */
   h1,
   h2,
   h3,
   h4,
   h5,
   h6,
-  p,
-  span,
-  div {
-    overflow-wrap: break-word;
+  p {
+    max-width: 100%;
+    overflow-wrap: normal;
+    word-break: normal;
   }
 
-  button {
-    max-width: 100%;
+  span,
+  div {
+    overflow-wrap: normal;
+    word-break: normal;
   }
 
   img {
@@ -132,9 +141,59 @@
     height: auto;
   }
 
-  table {
-    min-width: 600px;
+  button {
+    max-width: 100%;
+    white-space: normal;
   }
+
+  input,
+  textarea,
+  select {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  main,
+  section,
+  article,
+  header {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Prevent large fixed-width children */
+  main > *,
+  section > *,
+  article > * {
+    max-width: 100%;
+  }
+
+  /* =====================================================
+     MOBILE HEADINGS
+     ===================================================== */
+
+  h1 {
+    font-size: clamp(30px, 8vw, 42px);
+    line-height: 1.12;
+  }
+
+  h2 {
+    font-size: clamp(26px, 7vw, 36px);
+    line-height: 1.15;
+  }
+
+  h3 {
+    font-size: clamp(21px, 5.5vw, 28px);
+    line-height: 1.2;
+  }
+
+  p {
+    line-height: 1.55;
+  }
+
+  /* =====================================================
+     TABLES
+     ===================================================== */
 
   .table-container,
   .overflow-x-auto,
@@ -145,23 +204,104 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  main,
-  section,
-  header,
-  article {
+  table {
+    min-width: 600px;
+  }
+
+  /* =====================================================
+     HISTORY SEARCH
+     ===================================================== */
+
+  input[type="text"] {
+    width: 100%;
     max-width: 100%;
     box-sizing: border-box;
   }
 
-  select {
+  /* =====================================================
+     HISTORY FILTERS
+     ===================================================== */
+
+  .flex.items-center.gap-2.w-full.md\:w-auto {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .flex.items-center.gap-2.w-full.md\:w-auto > div {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .flex.items-center.gap-2.w-full.md\:w-auto select {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
     max-width: 100%;
   }
-}
 
-@media (max-width: 480px) {
-  body {
-    font-size: 14px;
+  /* =====================================================
+     HISTORY ACTION BUTTONS
+     ===================================================== */
+
+  .flex.items-center.gap-3,
+  .flex.items-center.gap-4 {
+    max-width: 100%;
   }
+
+  button {
+    max-width: 100%;
+  }
+
+  /* =====================================================
+     HISTORY TABLE / SCAN LIST
+     ===================================================== */
+
+  table {
+    width: max-content;
+    min-width: 700px;
+  }
+
+  td,
+  th {
+    overflow-wrap: normal;
+  }
+
+  /* =====================================================
+     MODALS / DIALOGS
+     ===================================================== */
+
+  [role="dialog"] {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+  }
+
+  [role="dialog"] img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* =====================================================
+     HERO / LARGE CONTENT
+     ===================================================== */
+
+  .hero,
+  .hero * {
+    max-width: 100%;
+  }
+
+  /* =====================================================
+     MOBILE SPACING
+     ===================================================== */
 
   #center {
     padding: 20px 12px;
@@ -193,65 +333,109 @@
   #spacer {
     height: 32px;
   }
+}
+
+/* =========================================================
+   EXTRA SMALL PHONES
+   ========================================================= */
+
+@media (max-width: 480px) {
+  body {
+    font-size: 14px;
+  }
+
+  h1 {
+    font-size: clamp(28px, 8vw, 36px);
+  }
+
+  h2 {
+    font-size: clamp(24px, 7vw, 32px);
+  }
+
+  h3 {
+    font-size: clamp(20px, 6vw, 26px);
+  }
 
   button,
   a {
     min-height: 40px;
   }
 
-  input,
-  textarea,
-  select {
-    max-width: 100%;
-    box-sizing: border-box;
-  }
-
   /* =====================================================
-     HISTORY FILTERS — MOBILE
+     HISTORY FILTERS
      ===================================================== */
 
   .flex.items-center.gap-2.w-full.md\:w-auto {
-    flex-direction: column;
-    align-items: stretch;
     width: 100%;
+    max-width: 100%;
+    gap: 14px;
   }
 
   .flex.items-center.gap-2.w-full.md\:w-auto > div {
     width: 100%;
-    display: flex;
-    align-items: center;
+    max-width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
   }
 
   .flex.items-center.gap-2.w-full.md\:w-auto select {
-    flex: 1;
-    min-width: 0;
     width: 100%;
+    max-width: 100%;
+    min-height: 44px;
   }
 
   /* =====================================================
-     HISTORY SEARCH — MOBILE
+     SEARCH
      ===================================================== */
 
   input[type="text"] {
+    width: 100%;
     max-width: 100%;
-    box-sizing: border-box;
+    min-height: 44px;
   }
 
   /* =====================================================
-     HISTORY TABLE — MOBILE
-     ===================================================== */
-
-  table {
-    width: max-content;
-    min-width: 700px;
-  }
-
-  /* =====================================================
-     MODALS / DIALOGS — MOBILE
+     DIALOG
      ===================================================== */
 
   [role="dialog"] {
-    max-width: calc(100vw - 24px);
-    box-sizing: border-box;
+    width: calc(100vw - 20px) !important;
+    max-width: calc(100vw - 20px) !important;
+  }
+
+  /* =====================================================
+     GENERAL MOBILE CONTENT
+     ===================================================== */
+
+  #center {
+    padding: 20px 12px;
+    gap: 14px;
+  }
+
+  #next-steps {
+    width: 100%;
+  }
+
+  #next-steps > div {
+    padding: 20px 14px;
+  }
+
+  #next-steps ul {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  #next-steps ul li {
+    width: 100%;
+    flex: none;
+  }
+
+  #next-steps ul a {
+    width: 100%;
+  }
+
+  #spacer {
+    height: 32px;
   }
 }
