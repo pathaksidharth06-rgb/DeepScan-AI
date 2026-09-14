@@ -3,13 +3,18 @@ import type { SonarScan } from '../types/sonar';
 
 const BACKEND_URL = 'https://deepscan-ai-tyvx.onrender.com';
 
+
+// ============================================================
+// IMAGE RESOLVER
+// ============================================================
+
 async function resolveImageAsBase64(
   imageUrl: string
 ): Promise<string | null> {
 
   if (!imageUrl) return null;
 
-  // Already base64
+  // Already Base64
   if (imageUrl.startsWith('data:image/')) {
     return imageUrl;
   }
@@ -30,6 +35,7 @@ async function resolveImageAsBase64(
   }
 
   try {
+
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -38,6 +44,7 @@ async function resolveImageAsBase64(
         response.status,
         url
       );
+
       return null;
     }
 
@@ -70,6 +77,10 @@ async function resolveImageAsBase64(
 }
 
 
+// ============================================================
+// GENERATE SURVEY PDF REPORT
+// ============================================================
+
 export async function generateSurveyPdfReport(
   scan: SonarScan
 ): Promise<void> {
@@ -80,16 +91,41 @@ export async function generateSurveyPdfReport(
     format: 'a4',
   });
 
-  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageWidth =
+    doc.internal.pageSize.getWidth();
 
-  // Header Banner
+
+  // ==========================================================
+  // HEADER BANNER
+  // ==========================================================
+
   doc.setFillColor(15, 23, 42);
-  doc.rect(0, 0, pageWidth, 28, 'F');
 
-  // Title
-  doc.setTextColor(255, 255, 255);
+  doc.rect(
+    0,
+    0,
+    pageWidth,
+    28,
+    'F'
+  );
+
+
+  // ==========================================================
+  // TITLE
+  // ==========================================================
+
+  doc.setTextColor(
+    255,
+    255,
+    255
+  );
+
   doc.setFontSize(16);
-  doc.setFont('helvetica', 'bold');
+
+  doc.setFont(
+    'helvetica',
+    'bold'
+  );
 
   doc.text(
     'DEEPSCAN AI — SONAR INTELLIGENCE REPORT',
@@ -97,9 +133,19 @@ export async function generateSurveyPdfReport(
     14
   );
 
+
   doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(148, 163, 184);
+
+  doc.setFont(
+    'helvetica',
+    'normal'
+  );
+
+  doc.setTextColor(
+    148,
+    163,
+    184
+  );
 
   doc.text(
     'AUTONOMOUS UNDERWATER THREAT & DEBRIS CLASSIFICATION',
@@ -107,10 +153,12 @@ export async function generateSurveyPdfReport(
     21
   );
 
+
   const reportId =
     `REP-${scan.id.slice(0, 8).toUpperCase()}-${Date.now()
       .toString()
       .slice(-4)}`;
+
 
   doc.setFontSize(8);
 
@@ -118,13 +166,27 @@ export async function generateSurveyPdfReport(
     `Report ID: ${reportId}`,
     pageWidth - 14,
     21,
-    { align: 'right' }
+    {
+      align: 'right',
+    }
   );
 
 
-  // Metadata Box
-  doc.setDrawColor(226, 232, 240);
-  doc.setFillColor(248, 250, 252);
+  // ==========================================================
+  // METADATA BOX
+  // ==========================================================
+
+  doc.setDrawColor(
+    226,
+    232,
+    240
+  );
+
+  doc.setFillColor(
+    248,
+    250,
+    252
+  );
 
   doc.roundedRect(
     14,
@@ -136,25 +198,42 @@ export async function generateSurveyPdfReport(
     'FD'
   );
 
-  doc.setFontSize(8.5);
-  doc.setTextColor(71, 85, 105);
 
-  let displayFilename = scan.filename;
+  doc.setFontSize(8.5);
+
+  doc.setTextColor(
+    71,
+    85,
+    105
+  );
+
+
+  let displayFilename =
+    scan.filename;
+
 
   if (displayFilename.length > 30) {
+
     displayFilename =
       displayFilename.substring(0, 18) +
       '...' +
       displayFilename.slice(-10);
   }
 
-  // Left Column
+
+  // ==========================================================
+  // LEFT COLUMN
+  // ==========================================================
+
   doc.text(
     `File: ${displayFilename}`,
     18,
     40,
-    { maxWidth: 90 }
+    {
+      maxWidth: 90,
+    }
   );
+
 
   doc.text(
     `Resolution: ${scan.resolution.width} × ${scan.resolution.height} px`,
@@ -162,19 +241,27 @@ export async function generateSurveyPdfReport(
     46
   );
 
+
   doc.text(
     `File Size: ${scan.fileSizeMB} MB`,
     18,
     52
   );
 
-  // Right Column
+
+  // ==========================================================
+  // RIGHT COLUMN
+  // ==========================================================
+
   doc.text(
     `Model: ${scan.modelVersion}`,
     115,
     40,
-    { maxWidth: 75 }
+    {
+      maxWidth: 75,
+    }
   );
+
 
   doc.text(
     `Inference Time: ${scan.processingTimeMs} ms`,
@@ -182,18 +269,33 @@ export async function generateSurveyPdfReport(
     46
   );
 
+
   doc.text(
     `Timestamp: ${scan.processedAt}`,
     115,
     52,
-    { maxWidth: 75 }
+    {
+      maxWidth: 75,
+    }
   );
 
 
-  // Sonar Image Evidence Section
+  // ==========================================================
+  // SONAR IMAGE EVIDENCE SECTION
+  // ==========================================================
+
   doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
+
+  doc.setFont(
+    'helvetica',
+    'bold'
+  );
+
+  doc.setTextColor(
+    15,
+    23,
+    42
+  );
 
   doc.text(
     '1. Acoustic Sonar Visual Evidence (Annotated Detections)',
@@ -202,22 +304,86 @@ export async function generateSurveyPdfReport(
   );
 
 
-  // Prefer annotated image
-  const rawImage =
-    scan.annotatedImageUrl ||
-    scan.imageUrl;
+  // ==========================================================
+  // IMAGE HANDLING — IMPORTANT FIX
+  // ==========================================================
 
-  const base64Image =
-    rawImage
-      ? await resolveImageAsBase64(rawImage)
-      : null;
+  /*
+   * Priority:
+   *
+   * 1. annotatedBase64
+   * 2. imageBase64
+   * 3. annotatedImageUrl
+   * 4. imageUrl
+   *
+   * Base64 is preferred because Render's /outputs folder
+   * can be temporary after restart/redeployment.
+   */
 
+  let base64Image: string | null = null;
+
+
+  // ----------------------------------------------------------
+  // 1. Prefer annotated Base64 image
+  // ----------------------------------------------------------
+
+  if (
+    scan.annotatedBase64 &&
+    scan.annotatedBase64.startsWith(
+      'data:image/'
+    )
+  ) {
+
+    base64Image =
+      scan.annotatedBase64;
+  }
+
+
+  // ----------------------------------------------------------
+  // 2. Otherwise use original Base64 image
+  // ----------------------------------------------------------
+
+  else if (
+    scan.imageBase64 &&
+    scan.imageBase64.startsWith(
+      'data:image/'
+    )
+  ) {
+
+    base64Image =
+      scan.imageBase64;
+  }
+
+
+  // ----------------------------------------------------------
+  // 3. Final fallback to backend URL
+  // ----------------------------------------------------------
+
+  else {
+
+    const rawImage =
+      scan.annotatedImageUrl ||
+      scan.imageUrl;
+
+    if (rawImage) {
+
+      base64Image =
+        await resolveImageAsBase64(
+          rawImage
+        );
+    }
+  }
+
+
+  // ==========================================================
+  // ADD IMAGE TO PDF
+  // ==========================================================
 
   if (base64Image) {
 
     try {
 
-      // Add image
+      // Add image as JPEG
       doc.addImage(
         base64Image,
         'JPEG',
@@ -234,8 +400,10 @@ export async function generateSurveyPdfReport(
         err
       );
 
+
       try {
 
+        // Try PNG if JPEG fails
         doc.addImage(
           base64Image,
           'PNG',
@@ -259,7 +427,12 @@ export async function generateSurveyPdfReport(
 
   } else {
 
-    doc.setFillColor(241, 245, 249);
+    // No image available
+    doc.setFillColor(
+      241,
+      245,
+      249
+    );
 
     doc.roundedRect(
       14,
@@ -272,7 +445,12 @@ export async function generateSurveyPdfReport(
     );
 
     doc.setFontSize(8);
-    doc.setTextColor(148, 163, 184);
+
+    doc.setTextColor(
+      148,
+      163,
+      184
+    );
 
     doc.text(
       '[Sonar visual evidence not available on record]',
@@ -282,8 +460,15 @@ export async function generateSurveyPdfReport(
   }
 
 
-  // Summary box
-  doc.setFillColor(241, 245, 249);
+  // ==========================================================
+  // SUMMARY BOX
+  // ==========================================================
+
+  doc.setFillColor(
+    241,
+    245,
+    249
+  );
 
   doc.roundedRect(
     120,
@@ -295,9 +480,19 @@ export async function generateSurveyPdfReport(
     'FD'
   );
 
+
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(30, 41, 59);
+
+  doc.setFont(
+    'helvetica',
+    'bold'
+  );
+
+  doc.setTextColor(
+    30,
+    41,
+    59
+  );
 
   doc.text(
     'Survey Summary',
@@ -305,9 +500,20 @@ export async function generateSurveyPdfReport(
     79
   );
 
+
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
+
+  doc.setFont(
+    'helvetica',
+    'normal'
+  );
+
+  doc.setTextColor(
+    71,
+    85,
+    105
+  );
+
 
   doc.text(
     `Total Contacts: ${scan.detections.length}`,
@@ -315,10 +521,13 @@ export async function generateSurveyPdfReport(
     85
   );
 
+
   const highPriority =
     scan.detections.filter(
-      (d) => d.priorityScore >= 70
+      (d) =>
+        d.priorityScore >= 70
     ).length;
+
 
   doc.text(
     `High Priority Threats: ${highPriority}`,
@@ -326,10 +535,13 @@ export async function generateSurveyPdfReport(
     91
   );
 
+
   doc.text(
     `Verified by Operator: ${
       scan.detections.filter(
-        (d) => d.verificationStatus === 'verified'
+        (d) =>
+          d.verificationStatus ===
+          'verified'
       ).length
     }`,
     126,
@@ -337,24 +549,34 @@ export async function generateSurveyPdfReport(
   );
 
 
-  // Sonar Quality
-  const sq = scan.sonarQuality;
-  const ea = scan.evidenceAssessment;
+  // ==========================================================
+  // SONAR QUALITY
+  // ==========================================================
+
+  const sq =
+    scan.sonarQuality;
+
+  const ea =
+    scan.evidenceAssessment;
+
 
   const speckleLvl =
     sq?.speckleNoise?.speckleLevel
       ? sq.speckleNoise.speckleLevel
       : 'UNAVAILABLE';
 
+
   const qualRating =
     sq?.resolutionQuality?.qualityRating
       ? sq.resolutionQuality.qualityRating
       : 'UNAVAILABLE';
 
+
   const dropoutSev =
     sq?.motionDropout?.artifactSeverity
       ? sq.motionDropout.artifactSeverity
       : 'UNAVAILABLE';
+
 
   const evText =
     ea?.evidenceScore !== undefined &&
@@ -362,11 +584,13 @@ export async function generateSurveyPdfReport(
       ? `${ea.evidenceScore}/100 (${ea.reliability || 'N/A'})`
       : 'UNAVAILABLE';
 
+
   doc.text(
     `Speckle Noise: ${speckleLvl}`,
     126,
     103
   );
+
 
   doc.text(
     `2D Quality: ${qualRating}`,
@@ -374,14 +598,24 @@ export async function generateSurveyPdfReport(
     109
   );
 
+
   doc.text(
     `Motion Dropout: ${dropoutSev}`,
     126,
     115
   );
 
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
+
+  doc.setFont(
+    'helvetica',
+    'bold'
+  );
+
+  doc.setTextColor(
+    15,
+    23,
+    42
+  );
 
   doc.text(
     `AI Evidence: ${evText}`,
@@ -390,12 +624,25 @@ export async function generateSurveyPdfReport(
   );
 
 
-  // Detections Table
+  // ==========================================================
+  // DETECTIONS TABLE
+  // ==========================================================
+
   let y = 156;
 
+
   doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
+
+  doc.setFont(
+    'helvetica',
+    'bold'
+  );
+
+  doc.setTextColor(
+    15,
+    23,
+    42
+  );
 
   doc.text(
     '2. Classified Contacts & Intelligence Insights',
@@ -403,10 +650,19 @@ export async function generateSurveyPdfReport(
     y
   );
 
+
   y += 6;
 
-  // Table Header
-  doc.setFillColor(30, 41, 59);
+
+  // ==========================================================
+  // TABLE HEADER
+  // ==========================================================
+
+  doc.setFillColor(
+    30,
+    41,
+    59
+  );
 
   doc.rect(
     14,
@@ -416,23 +672,79 @@ export async function generateSurveyPdfReport(
     'F'
   );
 
-  doc.setFontSize(8);
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
 
-  doc.text('#', 17, y + 5.5);
-  doc.text('Object Class', 25, y + 5.5);
-  doc.text('Confidence', 65, y + 5.5);
-  doc.text('Priority Score', 92, y + 5.5);
-  doc.text('Eco / Threat Impact', 122, y + 5.5);
-  doc.text('Status', 165, y + 5.5);
+  doc.setFontSize(8);
+
+  doc.setTextColor(
+    255,
+    255,
+    255
+  );
+
+  doc.setFont(
+    'helvetica',
+    'bold'
+  );
+
+
+  doc.text(
+    '#',
+    17,
+    y + 5.5
+  );
+
+
+  doc.text(
+    'Object Class',
+    25,
+    y + 5.5
+  );
+
+
+  doc.text(
+    'Confidence',
+    65,
+    y + 5.5
+  );
+
+
+  doc.text(
+    'Priority Score',
+    92,
+    y + 5.5
+  );
+
+
+  doc.text(
+    'Eco / Threat Impact',
+    122,
+    y + 5.5
+  );
+
+
+  doc.text(
+    'Status',
+    165,
+    y + 5.5
+  );
+
 
   y += 8;
 
 
-  if (scan.detections.length === 0) {
+  // ==========================================================
+  // DETECTIONS
+  // ==========================================================
 
-    doc.setFillColor(250, 250, 250);
+  if (
+    scan.detections.length === 0
+  ) {
+
+    doc.setFillColor(
+      250,
+      250,
+      250
+    );
 
     doc.rect(
       14,
@@ -442,14 +754,22 @@ export async function generateSurveyPdfReport(
       'F'
     );
 
+
     doc.setFontSize(8.5);
-    doc.setTextColor(100, 116, 139);
+
+    doc.setTextColor(
+      100,
+      116,
+      139
+    );
+
 
     doc.text(
       'No targets detected in this sonar frame (Clean Seabed).',
       25,
       y + 6.5
     );
+
 
     y += 10;
 
@@ -459,10 +779,17 @@ export async function generateSurveyPdfReport(
       (det, idx) => {
 
         doc.setFillColor(
-          idx % 2 === 0 ? 255 : 248,
-          idx % 2 === 0 ? 255 : 250,
-          idx % 2 === 0 ? 255 : 252
+          idx % 2 === 0
+            ? 255
+            : 248,
+          idx % 2 === 0
+            ? 255
+            : 250,
+          idx % 2 === 0
+            ? 255
+            : 252
         );
+
 
         doc.rect(
           14,
@@ -472,11 +799,13 @@ export async function generateSurveyPdfReport(
           'F'
         );
 
+
         doc.setDrawColor(
           226,
           232,
           240
         );
+
 
         doc.line(
           14,
@@ -485,7 +814,9 @@ export async function generateSurveyPdfReport(
           y + 12
         );
 
+
         doc.setFontSize(8);
+
         doc.setFont(
           'helvetica',
           'normal'
@@ -496,6 +827,7 @@ export async function generateSurveyPdfReport(
           41,
           59
         );
+
 
         doc.text(
           `${idx + 1}`,
@@ -503,17 +835,22 @@ export async function generateSurveyPdfReport(
           y + 7
         );
 
+
         doc.setFont(
           'helvetica',
           'bold'
         );
 
+
         doc.text(
           det.className,
           25,
           y + 5.5,
-          { maxWidth: 38 }
+          {
+            maxWidth: 38,
+          }
         );
+
 
         doc.setFont(
           'helvetica',
@@ -521,25 +858,32 @@ export async function generateSurveyPdfReport(
         );
 
         doc.setFontSize(7);
+
         doc.setTextColor(
           100,
           116,
           139
         );
 
+
         doc.text(
           det.category,
           25,
           y + 9.5,
-          { maxWidth: 38 }
+          {
+            maxWidth: 38,
+          }
         );
 
+
         doc.setFontSize(8);
+
         doc.setTextColor(
           30,
           41,
           59
         );
+
 
         doc.text(
           `${Math.round(
@@ -549,26 +893,33 @@ export async function generateSurveyPdfReport(
           y + 7
         );
 
+
         doc.text(
           `${det.priorityScore}/100 (${det.priorityLevel})`,
           92,
           y + 7
         );
 
+
         doc.text(
           det.ecoImpact,
           122,
           y + 7,
-          { maxWidth: 40 }
+          {
+            maxWidth: 40,
+          }
         );
+
 
         const statusText =
           det.verificationStatus.toUpperCase();
+
 
         doc.setFont(
           'helvetica',
           'bold'
         );
+
 
         if (
           det.verificationStatus ===
@@ -601,11 +952,13 @@ export async function generateSurveyPdfReport(
           );
         }
 
+
         doc.text(
           statusText,
           165,
           y + 7
         );
+
 
         y += 12;
       }
@@ -613,8 +966,12 @@ export async function generateSurveyPdfReport(
   }
 
 
-  // Recommended Actions
+  // ==========================================================
+  // RECOMMENDED ACTIONS
+  // ==========================================================
+
   y += 6;
+
 
   doc.setFillColor(
     254,
@@ -622,11 +979,13 @@ export async function generateSurveyPdfReport(
     199
   );
 
+
   doc.setDrawColor(
     252,
     211,
     77
   );
+
 
   doc.roundedRect(
     14,
@@ -638,7 +997,9 @@ export async function generateSurveyPdfReport(
     'FD'
   );
 
+
   doc.setFontSize(8.5);
+
   doc.setFont(
     'helvetica',
     'bold'
@@ -650,13 +1011,16 @@ export async function generateSurveyPdfReport(
     14
   );
 
+
   doc.text(
     'Operational Action Directive:',
     18,
     y + 6
   );
 
+
   doc.setFontSize(8);
+
   doc.setFont(
     'helvetica',
     'normal'
@@ -668,23 +1032,34 @@ export async function generateSurveyPdfReport(
     9
   );
 
+
   const primaryDet =
     scan.detections[0];
 
-  const directive = primaryDet
-    ? `Target [${primaryDet.className}]: ${primaryDet.actionRecommended}. Coordinate subsea intervention team and catalog contact in hydrographic repository.`
-    : 'No critical threats detected. Continue standard survey transect.';
+
+  const directive =
+    primaryDet
+      ? `Target [${primaryDet.className}]: ${primaryDet.actionRecommended}. Coordinate subsea intervention team and catalog contact in hydrographic repository.`
+      : 'No critical threats detected. Continue standard survey transect.';
+
 
   doc.text(
     directive,
     18,
     y + 12,
-    { maxWidth: pageWidth - 36 }
+    {
+      maxWidth:
+        pageWidth - 36,
+    }
   );
 
 
-  // Footer
+  // ==========================================================
+  // FOOTER
+  // ==========================================================
+
   const footerY = 255;
+
 
   doc.setDrawColor(
     203,
@@ -692,12 +1067,14 @@ export async function generateSurveyPdfReport(
     225
   );
 
+
   doc.line(
     14,
     footerY,
     pageWidth - 14,
     footerY
   );
+
 
   doc.setFontSize(7.5);
 
@@ -712,11 +1089,13 @@ export async function generateSurveyPdfReport(
     184
   );
 
+
   doc.text(
     'Certified by DeepScan AI Maritime Autonomous Decision Support Engine v2.0',
     14,
     footerY + 6
   );
+
 
   doc.text(
     'Hydrographic Survey Officer: __________________________   Date: ________________',
@@ -728,7 +1107,10 @@ export async function generateSurveyPdfReport(
   );
 
 
-  // Save PDF
+  // ==========================================================
+  // SAVE PDF
+  // ==========================================================
+
   doc.save(
     `DeepScan_Report_${scan.filename.replace(
       /\.[^/.]+$/,
