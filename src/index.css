@@ -74,3 +74,124 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* =========================================================
+   MOBILE RESPONSIVE DESIGN
+   Desktop design remains unchanged
+   ========================================================= */
+
+@media (max-width: 768px) {
+
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  /* General mobile spacing */
+  * {
+    max-width: 100%;
+  }
+
+  /* Prevent long text from breaking layout */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  p,
+  span,
+  div {
+    overflow-wrap: break-word;
+  }
+
+  /* Buttons */
+  button {
+    max-width: 100%;
+  }
+
+  /* Images */
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Tables / wide content */
+  table {
+    min-width: 600px;
+  }
+
+  /* Any table wrapper can scroll horizontally */
+  .table-container,
+  .overflow-x-auto,
+  [class*="overflow-x-auto"] {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+
+/* =========================================================
+   SMALL PHONES
+   ========================================================= */
+
+@media (max-width: 480px) {
+
+  body {
+    font-size: 14px;
+  }
+
+  #center {
+    padding: 20px 12px;
+    gap: 14px;
+  }
+
+  #next-steps {
+    width: 100%;
+  }
+
+  #next-steps > div {
+    padding: 20px 14px;
+  }
+
+  #next-steps ul {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  #next-steps ul li {
+    width: 100%;
+    flex: none;
+  }
+
+  #next-steps ul a {
+    width: 100%;
+  }
+
+  #spacer {
+    height: 32px;
+  }
+
+  /* Better touch targets */
+  button,
+  a {
+    min-height: 40px;
+  }
+
+  /* Keep inputs inside screen */
+  input,
+  textarea,
+  select {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}
