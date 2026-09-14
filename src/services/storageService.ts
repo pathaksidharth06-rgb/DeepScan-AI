@@ -52,12 +52,16 @@ export const storageService = {
   getStoredScans(): SonarScan[] {
     try {
       const data = localStorage.getItem(SCANS_STORAGE_KEY);
+
       if (!data) return [];
 
       const parsed: SonarScan[] = JSON.parse(data);
+
       if (!Array.isArray(parsed)) return [];
 
-      const clean = parsed.filter((s) => !isMockScan(s));
+      const clean = parsed.filter(
+        (s) => !isMockScan(s)
+      );
 
       if (clean.length !== parsed.length) {
         localStorage.setItem(
@@ -68,7 +72,11 @@ export const storageService = {
 
       return clean;
     } catch (e) {
-      console.warn('Could not read local scan history', e);
+      console.warn(
+        'Could not read local scan history',
+        e
+      );
+
       return [];
     }
   },
@@ -93,6 +101,7 @@ export const storageService = {
         console.warn(
           `Backend scans request failed: ${res.status}`
         );
+
         return [];
       }
 
@@ -107,13 +116,15 @@ export const storageService = {
           : [];
 
       return scans.filter(
-        (scan: SonarScan) => !isMockScan(scan)
+        (scan: SonarScan) =>
+          !isMockScan(scan)
       );
     } catch (e) {
       console.warn(
         'Backend scans fetch failed:',
         e
       );
+
       return [];
     }
   },
@@ -125,47 +136,63 @@ export const storageService = {
     try {
       const scans = this.getStoredScans();
 
-      // Do not store huge base64 images in localStorage.
-      // The backend now provides permanent-in-session Render URLs.
-      const lightScan: SonarScan = {
+      /*
+       * IMPORTANT:
+       * Keep imageBase64 and annotatedBase64.
+       *
+       * Previously these were removed and only the Render
+       * /outputs URL was stored. After a refresh, the History
+       * page therefore had no reliable image data.
+       *
+       * We keep the original image data so that:
+       * - History survives refresh
+       * - Inspect can show the image
+       * - PDF can use the image after refresh
+       *
+       * Existing URLs are also preserved.
+       */
+      const savedScan: SonarScan = {
         ...scan,
 
         imageUrl:
-          scan.imageUrl?.startsWith('data:')
-            ? (
-                scan.id
-                  ? `${BACKEND_URL}/outputs/${scan.id}.jpg`
-                  : ''
-              )
-            : scan.imageUrl,
+          scan.imageUrl ||
+          (
+            scan.id
+              ? `${BACKEND_URL}/outputs/${scan.id}.jpg`
+              : ''
+          ),
 
         annotatedImageUrl:
-          scan.annotatedImageUrl?.startsWith('data:')
-            ? (
-                scan.id
-                  ? `${BACKEND_URL}/outputs/${scan.id}_annotated.jpg`
-                  : ''
-              )
-            : scan.annotatedImageUrl,
+          scan.annotatedImageUrl ||
+          (
+            scan.id
+              ? `${BACKEND_URL}/outputs/${scan.id}_annotated.jpg`
+              : ''
+          ),
 
-        // Remove heavy fields from localStorage.
-        imageBase64: undefined,
-        annotatedBase64: undefined,
+        imageBase64:
+          scan.imageBase64,
+
+        annotatedBase64:
+          scan.annotatedBase64,
       };
 
-      const existingIndex = scans.findIndex(
-        (s) => s.id === scan.id
-      );
+      const existingIndex =
+        scans.findIndex(
+          (s) => s.id === scan.id
+        );
 
       if (existingIndex >= 0) {
-        scans[existingIndex] = lightScan;
+        scans[existingIndex] = savedScan;
       } else {
-        scans.unshift(lightScan);
+        scans.unshift(savedScan);
       }
 
       localStorage.setItem(
         SCANS_STORAGE_KEY,
-        JSON.stringify(scans.slice(0, 100))
+        JSON.stringify(
+          scans.slice(0, 100)
+        )
       );
     } catch (e) {
       console.error(
@@ -178,10 +205,14 @@ export const storageService = {
   // ------------------------------------------------------------
   // DELETE ONE SCAN
   // ------------------------------------------------------------
-  async deleteScan(scanId: string): Promise<void> {
+  async deleteScan(
+    scanId: string
+  ): Promise<void> {
     try {
       const res = await fetch(
-        `${BACKEND_URL}/scans/${encodeURIComponent(scanId)}`,
+        `${BACKEND_URL}/scans/${encodeURIComponent(
+          scanId
+        )}`,
         {
           method: 'DELETE',
         }
@@ -200,11 +231,13 @@ export const storageService = {
     }
 
     try {
-      const scans = this.getStoredScans();
+      const scans =
+        this.getStoredScans();
 
-      const updated = scans.filter(
-        (s) => s.id !== scanId
-      );
+      const updated =
+        scans.filter(
+          (s) => s.id !== scanId
+        );
 
       localStorage.setItem(
         SCANS_STORAGE_KEY,
@@ -263,21 +296,25 @@ export const storageService = {
     status: 'verified' | 'rejected',
     notes?: string
   ): void {
-    const scans = this.getStoredScans();
+    const scans =
+      this.getStoredScans();
 
-    const scan = scans.find(
-      (s) => s.id === scanId
-    );
+    const scan =
+      scans.find(
+        (s) => s.id === scanId
+      );
 
     if (!scan) return;
 
-    const detection = scan.detections.find(
-      (d) => d.id === detectionId
-    );
+    const detection =
+      scan.detections.find(
+        (d) => d.id === detectionId
+      );
 
     if (!detection) return;
 
-    detection.verificationStatus = status;
+    detection.verificationStatus =
+      status;
 
     if (notes) {
       detection.notes = notes;
@@ -342,7 +379,8 @@ export const storageService = {
     }
   },
 
-  getFeedbackHistory(): HITLFeedbackRecord[] {
+  getFeedbackHistory():
+    HITLFeedbackRecord[] {
     try {
       const data =
         localStorage.getItem(
@@ -351,7 +389,8 @@ export const storageService = {
 
       if (!data) return [];
 
-      const parsed = JSON.parse(data);
+      const parsed =
+        JSON.parse(data);
 
       return Array.isArray(parsed)
         ? parsed
@@ -397,7 +436,9 @@ export const storageService = {
       }.json`;
 
     document.body.appendChild(a);
+
     a.click();
+
     a.remove();
 
     URL.revokeObjectURL(url);
