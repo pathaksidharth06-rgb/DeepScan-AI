@@ -13,12 +13,14 @@ export const AboutPage: React.FC = () => {
         <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-800 border border-amber-200 flex items-center justify-center">
           <Info className="w-5 h-5" />
         </div>
+
         <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
             DeepScan AI Architecture & Evaluation
           </h2>
+
           <p className="text-xs text-slate-500">
-            Defense & Hackathon (SIH) Technical Documentation & Decision-Support Specifications
+            AI-Based Underwater Object Detection & Decision Support
           </p>
         </div>
       </div>
@@ -46,6 +48,7 @@ export const AboutPage: React.FC = () => {
           <h3 className="text-lg font-bold text-slate-900">
             Current 11-Class Sonar Taxonomy
           </h3>
+
           <p className="text-xs text-slate-500 mt-0.5">
             Rule-based ecological and operational interpretations mapped to each YOLO11n detection
             class.
@@ -58,49 +61,58 @@ export const AboutPage: React.FC = () => {
               <tr>
                 <th className="px-4 py-3">Class Name</th>
                 <th className="px-4 py-3">Category Group</th>
-                <th className="px-4 py-3">Ecological / Operational Impact</th>
-                <th className="px-4 py-3">Recommended Operator Action</th>
-                <th className="px-4 py-3">Base Hazard Weight</th>
+                <th className="px-4 py-3">
+                  Ecological / Operational Impact
+                </th>
+                <th className="px-4 py-3">
+                  Recommended Operator Action
+                </th>
+                <th className="px-4 py-3">
+                  Base Hazard Weight
+                </th>
               </tr>
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {Object.entries(TAXONOMY_RULES).map(([className, rule]) => (
-                <tr
-                  key={className}
-                  className="hover:bg-slate-50/70"
-                >
-                  <td className="px-4 py-3 font-bold text-slate-800">
-                    {className}
-                  </td>
+              {Object.entries(TAXONOMY_RULES).map(
+                ([className, rule]) => (
+                  <tr
+                    key={className}
+                    className="hover:bg-slate-50/70"
+                  >
+                    <td className="px-4 py-3 font-bold text-slate-800">
+                      {className}
+                    </td>
 
-                  <td className="px-4 py-3 text-slate-600">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                        rule.category === 'Marine Debris / Anthropogenic'
-                          ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                          : rule.category === 'Natural Object'
-                          ? 'bg-stone-100 text-stone-800 border border-stone-300'
-                          : 'bg-stone-200 text-stone-900 border border-stone-300'
-                      }`}
-                    >
-                      {rule.category}
-                    </span>
-                  </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                          rule.category ===
+                          'Marine Debris / Anthropogenic'
+                            ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                            : rule.category === 'Natural Object'
+                            ? 'bg-stone-100 text-stone-800 border border-stone-300'
+                            : 'bg-stone-200 text-stone-900 border border-stone-300'
+                        }`}
+                      >
+                        {rule.category}
+                      </span>
+                    </td>
 
-                  <td className="px-4 py-3 text-slate-700 font-medium">
-                    {rule.ecoImpact}
-                  </td>
+                    <td className="px-4 py-3 text-slate-700 font-medium">
+                      {rule.ecoImpact}
+                    </td>
 
-                  <td className="px-4 py-3 text-slate-500">
-                    {rule.actionRecommended}
-                  </td>
+                    <td className="px-4 py-3 text-slate-500">
+                      {rule.actionRecommended}
+                    </td>
 
-                  <td className="px-4 py-3 font-mono font-bold text-slate-700">
-                    {rule.baseEcoWeight} pts
-                  </td>
-                </tr>
-              ))}
+                    <td className="px-4 py-3 font-mono font-bold text-slate-700">
+                      {rule.baseEcoWeight} pts
+                    </td>
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
         </div>
